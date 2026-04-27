@@ -120,7 +120,7 @@ export default function TCReviewPage() {
   const navigate = useNavigate()
   const [tcs, setTcs] = useState([])
   const [summary, setSummary] = useState(null)
-  const [document, setDocument] = useState(null)
+  const [, setDocument] = useState(null)
   const [filters, setFilters] = useState({ tc_type: '', priority: '', review_status: '' })
   const [expandedId, setExpandedId] = useState(null)
   const [modalTc, setModalTc] = useState(null)
@@ -151,7 +151,9 @@ export default function TCReviewPage() {
   }
 
   async function handleApprove(tc) {
-    await api.reviewTc(tc.id, 'approved', null)
+    // 이미 승인 상태면 대기로 토글
+    const newStatus = tc.review_status === 'approved' ? 'pending' : 'approved'
+    await api.reviewTc(tc.id, newStatus, null)
     loadTcs()
   }
 
