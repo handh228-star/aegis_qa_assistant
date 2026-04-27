@@ -83,6 +83,7 @@ body {
 .stat-pending .stat-num { color: #6b7280; }
 .stat-approved .stat-num { color: #16a34a; }
 .stat-revision .stat-num { color: #d97706; }
+.stat-admin .stat-num { color: #7c3aed; }
 .stat-deleted .stat-num { color: #dc2626; }
 
 /* Filters */
@@ -196,6 +197,7 @@ body {
 .badge-approved { background: #dcfce7; color: #16a34a; }
 .badge-needs_revision { background: #fff8e1; color: #d97706; }
 .badge-deleted { background: #fee2e2; color: #dc2626; }
+.badge-admin_required { background: #ede9fe; color: #7c3aed; }
 
 /* Action buttons in table */
 .action-btns { display: flex; gap: 4px; }
@@ -214,6 +216,7 @@ body {
 .action-btn:hover { opacity: 0.8; }
 .action-approve { background: #dcfce7; }
 .action-revise { background: #fff8e1; }
+.action-admin { background: #ede9fe; }
 .action-delete { background: #fee2e2; }
 
 /* Modal */

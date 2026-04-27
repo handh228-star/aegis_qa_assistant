@@ -25,10 +25,11 @@ class TCStatus(str, enum.Enum):
 
 
 class ReviewStatus(str, enum.Enum):
-    PENDING = "pending"           # 검토 대기
-    APPROVED = "approved"         # 승인
-    NEEDS_REVISION = "needs_revision"  # 수정 필요
-    DELETED = "deleted"           # 삭제 예정
+    PENDING = "pending"               # 검토 대기
+    APPROVED = "approved"             # 승인
+    NEEDS_REVISION = "needs_revision" # 수정 필요
+    ADMIN_REQUIRED = "admin_required" # 관리자 확인 필요
+    DELETED = "deleted"               # 삭제 예정
 
 
 class TestCase(Base):

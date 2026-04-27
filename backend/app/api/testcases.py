@@ -136,6 +136,7 @@ def regenerate_testcases(document_id: int, db: Session = Depends(get_db)):
     tcs = db.query(TestCase).filter(
         TestCase.document_id == document_id,
         TestCase.review_status == ReviewStatus.NEEDS_REVISION,
+        # admin_required는 AI 재생성 대상에서 제외
     ).all()
 
     if not tcs:
@@ -174,6 +175,21 @@ def regenerate_testcases(document_id: int, db: Session = Depends(get_db)):
             print(f"[재생성 실패] TC {tc.tc_id}: {e}")
 
     db.commit()
+
+    # 재생성된 TC로 RAG 이력 갱신
+    try:
+        from app.services.tc_ingestion import ingest_testcases
+        all_tcs = db.query(TestCase).filter(TestCase.document_id == document_id).all()
+        tc_dicts = [{
+            "tc_id": t.tc_id, "category": t.category, "title": t.title,
+            "objective": t.objective, "tc_type": t.tc_type.value,
+            "priority": t.priority.value, "steps": t.steps or [],
+            "expected_result": t.expected_result,
+        } for t in all_tcs]
+        ingest_testcases(document_id, tc_dicts)
+    except Exception as e:
+        print(f"[TC 이력 갱신 실패] {e}")
+
     return {"regenerated": updated, "total": len(tcs)}
 
 

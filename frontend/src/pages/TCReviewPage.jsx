@@ -4,7 +4,7 @@ import { api } from '../api'
 
 const TYPE_LABEL = { positive: '정상', negative: '비정상', boundary: '경계값', exception: '예외' }
 const PRIORITY_LABEL = { high: 'HIGH', medium: 'MED', low: 'LOW' }
-const REVIEW_LABEL = { pending: '대기', approved: '승인', needs_revision: '수정요청', deleted: '삭제' }
+const REVIEW_LABEL = { pending: '대기', approved: '승인', needs_revision: '수정요청', admin_required: '관리자확인', deleted: '삭제' }
 
 function ReviewModal({ tc, onClose, onSave }) {
   const [note, setNote] = useState(tc?.review_note || '')
@@ -30,7 +30,7 @@ function ReviewModal({ tc, onClose, onSave }) {
   )
 }
 
-function TCRow({ tc, expanded, onToggle, onApprove, onRevise, onDelete }) {
+function TCRow({ tc, expanded, onToggle, onApprove, onRevise, onAdmin, onDelete }) {
   return (
     <>
       <tr className={`tc-row ${expanded ? 'expanded' : ''}`} onClick={onToggle}>
@@ -56,6 +56,11 @@ function TCRow({ tc, expanded, onToggle, onApprove, onRevise, onDelete }) {
               title="수정 요청"
               onClick={() => onRevise(tc)}
             >✏️</button>
+            <button
+              className="action-btn action-admin"
+              title="관리자 확인 필요"
+              onClick={() => onAdmin(tc)}
+            >👑</button>
             <button
               className="action-btn action-delete"
               title="삭제"
@@ -167,6 +172,12 @@ export default function TCReviewPage() {
     loadTcs()
   }
 
+  async function handleAdmin(tc) {
+    const newStatus = tc.review_status === 'admin_required' ? 'pending' : 'admin_required'
+    await api.reviewTc(tc.id, newStatus, tc.review_note || null)
+    loadTcs()
+  }
+
   async function handleDelete(tc) {
     if (!confirm(`"${tc.title}" TC를 삭제하시겠습니까?`)) return
     await api.deleteTc(tc.id)
@@ -252,6 +263,10 @@ export default function TCReviewPage() {
             <div className="stat-num">{rd.needs_revision || 0}</div>
             <div className="stat-label">수정 요청 ✏️</div>
           </div>
+          <div className="stat-box stat-admin">
+            <div className="stat-num">{rd.admin_required || 0}</div>
+            <div className="stat-label">관리자확인 👑</div>
+          </div>
           <div className="stat-box stat-deleted">
             <div className="stat-num">{rd.deleted || 0}</div>
             <div className="stat-label">삭제 예정 ✗</div>
@@ -277,7 +292,7 @@ export default function TCReviewPage() {
           ))}
           <div className="filter-sep" />
           <span className="filter-label">검토</span>
-          {['pending', 'approved', 'needs_revision', 'deleted'].map(r => (
+          {['pending', 'approved', 'needs_revision', 'admin_required', 'deleted'].map(r => (
             <FilterChip key={r} field="review_status" value={r} label={REVIEW_LABEL[r]} />
           ))}
         </div>
@@ -312,6 +327,7 @@ export default function TCReviewPage() {
                     onToggle={() => setExpandedId(expandedId === tc.id ? null : tc.id)}
                     onApprove={handleApprove}
                     onRevise={handleRevise}
+                    onAdmin={handleAdmin}
                     onDelete={handleDelete}
                   />
                 ))

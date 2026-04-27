@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-const BASE = 'http://localhost:8000/api'
+const BASE = `http://${window.location.hostname}:8000/api`
 
 export const api = {
   // Projects

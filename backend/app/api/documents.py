@@ -76,6 +76,13 @@ def _process_document(document_id: int):
         doc.error_message = None
         db.commit()
 
+        # 생성된 TC를 RAG 이력에 저장
+        try:
+            from app.services.tc_ingestion import ingest_testcases
+            ingest_testcases(doc.id, result["testcases"])
+        except Exception as e:
+            print(f"[TC 이력 저장 실패] {e}")
+
     except Exception as e:
         print(f"[TC생성 최종 실패] {e}")
         doc = db.query(Document).filter(Document.id == document_id).first()
