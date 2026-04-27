@@ -5,6 +5,13 @@ import enum
 from app.models.database import Base
 
 
+class ChangeType(str, enum.Enum):
+    NEW_FEATURE = "new_feature"    # 신규 기능 추가
+    MODIFICATION = "modification"  # 기존 기능 수정
+    BUG_FIX = "bug_fix"           # 버그 수정
+    UNKNOWN = "unknown"            # 판단 불가 (일반 기획서)
+
+
 class TCType(str, enum.Enum):
     POSITIVE = "positive"
     NEGATIVE = "negative"
@@ -47,6 +54,7 @@ class TestCase(Base):
     tc_type = Column(Enum(TCType), default=TCType.POSITIVE)
     priority = Column(Enum(TCPriority), default=TCPriority.MEDIUM)
     status = Column(Enum(TCStatus), default=TCStatus.DRAFT)
+    change_type = Column(String(50), default="unknown", nullable=True)
     review_status = Column(Enum(ReviewStatus), default=ReviewStatus.PENDING)
     review_note = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

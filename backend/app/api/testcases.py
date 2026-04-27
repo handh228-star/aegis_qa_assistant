@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime
 from app.models.database import get_db
-from app.models.testcase import TestCase, TCType, TCPriority, TCStatus, ReviewStatus
+from app.models.testcase import TestCase, TCType, TCPriority, TCStatus, ReviewStatus, ChangeType
 from app.models.document import Document
 from app.models.project import Project
 from app.core.config import settings
@@ -42,6 +42,7 @@ class TestCaseResponse(BaseModel):
     expected_result: str
     tc_type: TCType
     priority: TCPriority
+    change_type: Optional[ChangeType]
     status: TCStatus
     review_status: ReviewStatus
     review_note: Optional[str]
@@ -57,6 +58,7 @@ def list_testcases(
     tc_type: Optional[TCType] = None,
     priority: Optional[TCPriority] = None,
     review_status: Optional[ReviewStatus] = None,
+    change_type: Optional[ChangeType] = None,
     db: Session = Depends(get_db),
 ):
     query = db.query(TestCase).filter(TestCase.document_id == document_id)
@@ -66,6 +68,8 @@ def list_testcases(
         query = query.filter(TestCase.priority == priority)
     if review_status:
         query = query.filter(TestCase.review_status == review_status)
+    if change_type:
+        query = query.filter(TestCase.change_type == change_type)
     return query.order_by(TestCase.tc_id).all()
 
 

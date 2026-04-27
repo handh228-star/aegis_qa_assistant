@@ -27,9 +27,15 @@ def init_db():
         for col, definition in [
             ("review_status", "VARCHAR DEFAULT 'pending'"),
             ("review_note", "TEXT"),
+            ("change_type", "VARCHAR DEFAULT 'unknown'"),
         ]:
             try:
                 conn.execute(text(f"ALTER TABLE testcases ADD COLUMN {col} {definition}"))
                 conn.commit()
             except Exception:
                 pass
+
+        # 기존 행의 NULL 값 기본값으로 채우기
+        conn.execute(text("UPDATE testcases SET review_status = 'pending' WHERE review_status IS NULL"))
+        conn.execute(text("UPDATE testcases SET change_type = 'unknown' WHERE change_type IS NULL"))
+        conn.commit()

@@ -5,6 +5,7 @@ import { api } from '../api'
 const TYPE_LABEL = { positive: '정상', negative: '비정상', boundary: '경계값', exception: '예외' }
 const PRIORITY_LABEL = { high: 'HIGH', medium: 'MED', low: 'LOW' }
 const REVIEW_LABEL = { pending: '대기', approved: '승인', needs_revision: '수정요청', admin_required: '관리자확인', deleted: '삭제' }
+const CHANGE_TYPE_LABEL = { new_feature: '신규', modification: '수정', bug_fix: '버그픽스', unknown: '-' }
 
 function ReviewModal({ tc, onClose, onSave }) {
   const [note, setNote] = useState(tc?.review_note || '')
@@ -74,6 +75,14 @@ function TCRow({ tc, expanded, onToggle, onApprove, onRevise, onAdmin, onDelete 
           <td colSpan={7}>
             <div className="detail-grid">
               <div>
+                {tc.change_type && tc.change_type !== 'unknown' && (
+                  <div className="detail-section" style={{ marginBottom: 14 }}>
+                    <h4>변경 유형</h4>
+                    <span className={`badge badge-change-${tc.change_type}`}>
+                      {CHANGE_TYPE_LABEL[tc.change_type]}
+                    </span>
+                  </div>
+                )}
                 <div className="detail-section" style={{ marginBottom: 14 }}>
                   <h4>목적</h4>
                   <p>{tc.objective}</p>
@@ -126,7 +135,7 @@ export default function TCReviewPage() {
   const [tcs, setTcs] = useState([])
   const [summary, setSummary] = useState(null)
   const [, setDocument] = useState(null)
-  const [filters, setFilters] = useState({ tc_type: '', priority: '', review_status: '' })
+  const [filters, setFilters] = useState({ tc_type: '', priority: '', review_status: '', change_type: '' })
   const [expandedId, setExpandedId] = useState(null)
   const [modalTc, setModalTc] = useState(null)
   const [isRegenerating, setIsRegenerating] = useState(false)
@@ -209,6 +218,7 @@ export default function TCReviewPage() {
     if (filters.tc_type && tc.tc_type !== filters.tc_type) return false
     if (filters.priority && tc.priority !== filters.priority) return false
     if (filters.review_status && tc.review_status !== filters.review_status) return false
+    if (filters.change_type && tc.change_type !== filters.change_type) return false
     return true
   })
 
@@ -294,6 +304,12 @@ export default function TCReviewPage() {
           <span className="filter-label">검토</span>
           {['pending', 'approved', 'needs_revision', 'admin_required', 'deleted'].map(r => (
             <FilterChip key={r} field="review_status" value={r} label={REVIEW_LABEL[r]} />
+          ))}
+          <div className="filter-sep" />
+          <span className="filter-label">변경유형</span>
+          <FilterChip field="change_type" value="" label="전체" />
+          {['new_feature', 'modification', 'bug_fix'].map(c => (
+            <FilterChip key={c} field="change_type" value={c} label={CHANGE_TYPE_LABEL[c]} />
           ))}
         </div>
 

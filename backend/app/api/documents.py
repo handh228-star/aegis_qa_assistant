@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from app.models.database import get_db
 from app.models.document import Document, DocumentStatus
-from app.models.testcase import TestCase, TCType, TCPriority, TCStatus
+from app.models.testcase import TestCase, TCType, TCPriority, TCStatus, ChangeType
 from app.models.project import Project
 from app.core.config import settings
 from app.services.document_parser import get_pdf_page_count
@@ -42,6 +42,7 @@ def _save_testcases(db, doc, result):
             expected_result=tc_data.get("expected_result", ""),
             tc_type=TCType(tc_data.get("tc_type", "positive")),
             priority=TCPriority(tc_data.get("priority", "medium")),
+            change_type=ChangeType(tc_data.get("change_type", "unknown")),
             status=TCStatus.DRAFT,
         )
         db.add(tc)

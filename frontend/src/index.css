@@ -198,6 +198,9 @@ body {
 .badge-needs_revision { background: #fff8e1; color: #d97706; }
 .badge-deleted { background: #fee2e2; color: #dc2626; }
 .badge-admin_required { background: #ede9fe; color: #7c3aed; }
+.badge-change-new_feature { background: #dbeafe; color: #1d4ed8; }
+.badge-change-modification { background: #fef3c7; color: #d97706; }
+.badge-change-bug_fix { background: #fee2e2; color: #dc2626; }
 
 /* Action buttons in table */
 .action-btns { display: flex; gap: 4px; }
