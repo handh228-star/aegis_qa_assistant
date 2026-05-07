@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.models.database import init_db
-from app.api import projects, documents, testcases, manuals, defects
+from app.api import projects, documents, testcases, manuals, defects, crawler, rulesets
 
 app = FastAPI(
     title="Aegis QA Assistant",
@@ -22,6 +22,8 @@ app.include_router(documents.router, prefix="/api")
 app.include_router(testcases.router, prefix="/api")
 app.include_router(manuals.router, prefix="/api")
 app.include_router(defects.router, prefix="/api")
+app.include_router(crawler.router, prefix="/api")
+app.include_router(rulesets.router, prefix="/api")
 
 
 @app.on_event("startup")

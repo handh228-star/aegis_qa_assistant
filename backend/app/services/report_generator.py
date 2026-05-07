@@ -94,8 +94,8 @@ def _create_summary_sheet(ws, testcases: List[TestCase], project_name: str):
 
 
 def _create_tc_sheet(ws, testcases: List[TestCase]):
-    headers = ["TC ID", "카테고리", "제목", "유형", "우선순위", "사전조건", "테스트 단계", "기대 결과"]
-    col_widths = [10, 18, 35, 10, 10, 25, 45, 35]
+    headers = ["TC ID", "카테고리", "제목", "목적", "유형", "우선순위", "사전조건", "테스트 단계", "기대 결과"]
+    col_widths = [10, 18, 32, 28, 10, 10, 22, 50, 32]
 
     for col, (header, width) in enumerate(zip(headers, col_widths), start=1):
         cell = ws.cell(row=1, column=col, value=header)
@@ -106,14 +106,22 @@ def _create_tc_sheet(ws, testcases: List[TestCase]):
 
     for row, tc in enumerate(testcases, start=2):
         preconditions = "\n".join(tc.preconditions) if tc.preconditions else ""
-        steps_text = "\n".join(
-            [f"{s['step']}. {s['action']}" for s in tc.steps] if tc.steps else []
-        )
+
+        step_lines = []
+        for s in (tc.steps or []):
+            num = s.get("step", "")
+            action = s.get("action", "")
+            expected = s.get("expected", "")
+            step_lines.append(f"{num}. {action}")
+            if expected:
+                step_lines.append(f"   → {expected}")
+        steps_text = "\n".join(step_lines)
 
         values = [
             tc.tc_id,
             tc.category,
             tc.title,
+            tc.objective,
             TYPE_LABEL.get(tc.tc_type, tc.tc_type),
             PRIORITY_LABEL.get(tc.priority, tc.priority),
             preconditions,
@@ -126,8 +134,8 @@ def _create_tc_sheet(ws, testcases: List[TestCase]):
             cell.alignment = Alignment(vertical="top", wrap_text=True)
             _apply_border(cell)
 
-        priority_cell = ws.cell(row=row, column=5)
+        priority_cell = ws.cell(row=row, column=6)
         color = PRIORITY_COLOR.get(tc.priority, "000000")
         priority_cell.font = Font(bold=True, color=color)
 
-        ws.row_dimensions[row].height = max(40, len(steps_text.split("\n")) * 15)
+        ws.row_dimensions[row].height = max(40, len(step_lines) * 15)

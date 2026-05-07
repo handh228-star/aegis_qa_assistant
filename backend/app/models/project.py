@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text
+from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.models.database import Base
@@ -11,7 +11,9 @@ class Project(Base):
     name = Column(String(200), nullable=False)
     description = Column(Text, nullable=True)
     service_url = Column(String(500), nullable=True)
+    ruleset_id = Column(Integer, ForeignKey("qa_rulesets.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     documents = relationship("Document", back_populates="project", cascade="all, delete-orphan")
+    ruleset = relationship("QARuleSet", foreign_keys=[ruleset_id])

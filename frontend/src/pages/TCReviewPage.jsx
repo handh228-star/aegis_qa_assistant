@@ -2,10 +2,71 @@ import { useState, useEffect } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { api } from '../api'
 
+const CHANGE_TYPE_COLOR = {
+  new_feature:  { color: '#16a34a', bg: '#dcfce7', label: '신규' },
+  modification: { color: '#2563eb', bg: '#dbeafe', label: '수정' },
+  bug_fix:      { color: '#dc2626', bg: '#fee2e2', label: '버그수정' },
+  unknown:      { color: '#6b7280', bg: '#f3f4f6', label: '일반' },
+}
+
+function TreePanel({ nodes, depth = 0 }) {
+  return (
+    <div style={{ marginLeft: depth * 16 }}>
+      {nodes.map(node => {
+        const ct = CHANGE_TYPE_COLOR[node.change_type] || CHANGE_TYPE_COLOR.unknown
+        const hasChildren = node.children && node.children.length > 0
+        return (
+          <div key={node.id} style={{ marginBottom: 4 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '6px 10px',
+              borderRadius: 6, background: depth === 0 ? '#f8fafc' : '#fff',
+              border: '1px solid #e5e7eb' }}>
+              <span style={{ color: '#9ca3af', fontSize: 12, marginTop: 2, flexShrink: 0 }}>
+                {hasChildren ? '▸' : '•'}
+              </span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  <span style={{ fontWeight: depth === 0 ? 700 : 500, fontSize: depth === 0 ? 14 : 13 }}>
+                    {node.name}
+                  </span>
+                  <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 8,
+                    color: ct.color, background: ct.bg }}>{ct.label}</span>
+                </div>
+                {node.description && (
+                  <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>{node.description}</div>
+                )}
+                {node.key_points?.length > 0 && (
+                  <div style={{ marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                    {node.key_points.map((kp, i) => (
+                      <span key={i} style={{ fontSize: 11, background: '#f0f9ff', color: '#0369a1',
+                        padding: '1px 6px', borderRadius: 8, border: '1px solid #bae6fd' }}>{kp}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+            {hasChildren && (
+              <div style={{ marginTop: 4 }}>
+                <TreePanel nodes={node.children} depth={depth + 1} />
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 const TYPE_LABEL = { positive: '정상', negative: '비정상', boundary: '경계값', exception: '예외' }
 const PRIORITY_LABEL = { high: 'HIGH', medium: 'MED', low: 'LOW' }
 const REVIEW_LABEL = { pending: '대기', approved: '승인', needs_revision: '수정요청', admin_required: '관리자확인', deleted: '삭제' }
 const CHANGE_TYPE_LABEL = { new_feature: '신규', modification: '수정', bug_fix: '버그픽스', unknown: '-' }
+const LEVEL_INFO = {
+  1: { label: '빠른 검증',  target: 100 },
+  2: { label: '일반',       target: 200 },
+  3: { label: '꼼꼼하게',   target: 400 },
+  4: { label: '심층',       target: 800 },
+  5: { label: '완전 망라',  target: 1600 },
+}
 
 function ReviewModal({ tc, onClose, onSave }) {
   const [note, setNote] = useState(tc?.review_note || '')
@@ -134,13 +195,28 @@ export default function TCReviewPage() {
   const navigate = useNavigate()
   const [tcs, setTcs] = useState([])
   const [summary, setSummary] = useState(null)
-  const [, setDocument] = useState(null)
+  const [docInfo, setDocInfo] = useState(null)
   const [filters, setFilters] = useState({ tc_type: '', priority: '', review_status: '', change_type: '' })
   const [expandedId, setExpandedId] = useState(null)
   const [modalTc, setModalTc] = useState(null)
   const [isRegenerating, setIsRegenerating] = useState(false)
+  const [tree, setTree] = useState(null)
+  const [showTree, setShowTree] = useState(false)
 
   useEffect(() => { loadAll() }, [documentId])
+
+  async function toggleTree() {
+    if (!showTree && !tree) {
+      try {
+        const { data } = await api.getTree(documentId)
+        setTree(data)
+      } catch (e) {
+        alert('메뉴트리를 불러올 수 없습니다.')
+        return
+      }
+    }
+    setShowTree(v => !v)
+  }
 
   async function loadAll() {
     try {
@@ -151,7 +227,7 @@ export default function TCReviewPage() {
       ])
       setTcs(tcRes.data)
       setSummary(sumRes.data)
-      setDocument(docRes.data)
+      setDocInfo(docRes.data)
     } catch (e) { console.error(e) }
   }
 
@@ -250,10 +326,41 @@ export default function TCReviewPage() {
       </nav>
 
       <div className="container">
-        <div className="page-header">
-          <h1>TC 검토</h1>
-          <p>TC를 승인하거나 수정 요청한 후 AI 보완 요청을 실행하세요</p>
+        <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div>
+            <h1>TC 검토</h1>
+            <p>TC를 승인하거나 수정 요청한 후 AI 보완 요청을 실행하세요</p>
+          </div>
+          <button
+            onClick={toggleTree}
+            style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid #d1d5db',
+              background: showTree ? '#eff6ff' : '#fff', color: showTree ? '#2563eb' : '#374151',
+              fontWeight: 600, fontSize: 13, cursor: 'pointer', flexShrink: 0 }}
+          >
+            🌲 메뉴트리 {showTree ? '닫기' : '보기'}
+          </button>
         </div>
+
+        {showTree && tree && (
+          <div className="card" style={{ marginBottom: 16 }}>
+            <div className="card-header">
+              <span className="card-title">{tree.title || '메뉴트리'}</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <span style={{ fontSize: 12, color: '#9ca3af' }}>TC 생성에 사용된 메뉴트리 (읽기 전용)</span>
+                <a
+                  href={api.treeExportUrl(documentId)}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ fontSize: 12, padding: '3px 12px', borderRadius: 6, border: '1px solid #d1d5db',
+                    background: '#fff', color: '#374151', textDecoration: 'none', fontWeight: 500 }}
+                >
+                  📥 Excel 다운로드
+                </a>
+              </div>
+            </div>
+            <TreePanel nodes={tree.tree || []} />
+          </div>
+        )}
 
         {/* 통계 */}
         <div className="stats-bar">
@@ -356,6 +463,15 @@ export default function TCReviewPage() {
         <div className="bottom-actions">
           <div style={{ fontSize: 13, color: '#6b7280' }}>
             {filtered.length}개 표시 / 전체 {tcs.length}개
+            {docInfo?.tc_level && (() => {
+              const lv = docInfo.tc_level
+              const info = LEVEL_INFO[lv]
+              return (
+                <span style={{ marginLeft: 12, color: '#9ca3af' }}>
+                  · 생성 레벨 {lv} ({info?.label}) · 참고 목표 ~{info?.target}개
+                </span>
+              )
+            })()}
           </div>
           <div style={{ display: 'flex', gap: 10 }}>
             <button

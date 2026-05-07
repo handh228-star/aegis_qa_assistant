@@ -74,9 +74,9 @@ class SimpleVectorStore:
                 self.metadatas.append(meta)
         self._save()
 
-    def query(self, query_texts: List[str], n_results: int = 5) -> Dict:
+    def query(self, query_texts: List[str], n_results: int = 5, score_threshold: float = 0.0) -> Dict:
         if not self.embeddings:
-            return {"documents": [[]], "metadatas": [[]]}
+            return {"documents": [[]], "metadatas": [[]], "scores": [[]]}
 
         query_embedding = self.embedding_fn(query_texts)[0]
         query_vec = np.array(query_embedding, dtype=np.float32)
@@ -90,9 +90,13 @@ class SimpleVectorStore:
         top_k = min(n_results, len(similarities))
         top_indices = np.argsort(similarities)[::-1][:top_k]
 
+        # 임계값 이상인 결과만 반환
+        filtered = [(i, float(similarities[i])) for i in top_indices if similarities[i] >= score_threshold]
+
         return {
-            "documents": [[self.documents[i] for i in top_indices]],
-            "metadatas": [[self.metadatas[i] for i in top_indices]],
+            "documents": [[self.documents[i] for i, _ in filtered]],
+            "metadatas": [[self.metadatas[i] for i, _ in filtered]],
+            "scores": [[score for _, score in filtered]],
         }
 
 
@@ -100,11 +104,14 @@ def _get_embedding_fn():
     client = genai.Client(api_key=settings.GOOGLE_API_KEY)
 
     def embed(texts: List[str]) -> List[List[float]]:
-        result = client.models.embed_content(
-            model=settings.GEMINI_EMBEDDING_MODEL,
-            contents=texts,
-        )
-        return [list(e.values) for e in result.embeddings]
+        results = []
+        for text in texts:
+            result = client.models.embed_content(
+                model=settings.GEMINI_EMBEDDING_MODEL,
+                contents=text,
+            )
+            results.append(list(result.embeddings[0].values))
+        return results
 
     return embed
 

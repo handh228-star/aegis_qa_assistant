@@ -2,6 +2,8 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import ProjectsPage from './pages/ProjectsPage'
 import DocumentsPage from './pages/DocumentsPage'
 import TCReviewPage from './pages/TCReviewPage'
+import TreeViewPage from './pages/TreeViewPage'
+import RulesetsPage from './pages/RulesetsPage'
 
 export default function App() {
   return (
@@ -9,7 +11,9 @@ export default function App() {
       <Routes>
         <Route path="/" element={<ProjectsPage />} />
         <Route path="/projects/:projectId" element={<DocumentsPage />} />
+        <Route path="/tree/:documentId" element={<TreeViewPage />} />
         <Route path="/review/:documentId" element={<TCReviewPage />} />
+        <Route path="/rulesets" element={<RulesetsPage />} />
         <Route path="*" element={<Navigate to="/" />} />
       </Routes>
     </BrowserRouter>

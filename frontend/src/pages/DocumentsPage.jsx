@@ -4,6 +4,8 @@ import { api } from '../api'
 
 const STATUS_LABEL = {
   uploaded: '업로드됨',
+  analyzing: '트리 생성중',
+  analyzed: '트리 검토 필요',
   parsing: '분석중',
   parsed: '분석완료',
   tc_generating: 'TC 생성중',
@@ -17,7 +19,16 @@ export default function DocumentsPage() {
   const [project, setProject] = useState(null)
   const [documents, setDocuments] = useState([])
   const [uploading, setUploading] = useState(false)
+  const [tcLevel, setTcLevel] = useState(3)
   const fileRef = useRef()
+
+  const LEVEL_INFO = {
+    1: { label: '핵심 검증', desc: '대표 케이스 위주, 리스크가 낮거나 일정이 촉박한 경우' },
+    2: { label: '표준 검증', desc: '정상/비정상/경계값/예외 균형 있게, 일반 프로젝트에 적합' },
+    3: { label: '정밀 검증', desc: '세부 시나리오·업무 규칙 예외 포함, 중요도 높은 기능에 권장' },
+    4: { label: '심층 검증', desc: '조합 케이스·연동 시나리오까지, 고품질 검증이 필요한 경우' },
+    5: { label: '전수 검증', desc: '모든 엣지케이스 망라, 대형 릴리즈·고위험 프로젝트' },
+  }
   const navigate = useNavigate()
   const pollingRef = useRef(null)
 
@@ -39,7 +50,7 @@ export default function DocumentsPage() {
       const { data } = await api.getDocuments(projectId)
       setDocuments(data)
       // 생성 중인 문서가 있으면 폴링
-      const hasGenerating = data.some(d => ['tc_generating', 'tc_retrying', 'uploaded', 'parsing'].includes(d.status))
+      const hasGenerating = data.some(d => ['tc_generating', 'tc_retrying', 'uploaded', 'parsing', 'analyzing'].includes(d.status))
       if (hasGenerating) {
         clearInterval(pollingRef.current)
         pollingRef.current = setInterval(loadDocuments, 3000)
@@ -56,7 +67,7 @@ export default function DocumentsPage() {
     }
     setUploading(true)
     try {
-      await api.uploadDocument(projectId, file)
+      await api.uploadDocument(projectId, file, tcLevel)
       loadDocuments()
     } catch (e) {
       alert('업로드 실패: ' + (e.response?.data?.detail || e.message))
@@ -74,6 +85,8 @@ export default function DocumentsPage() {
   function handleDocClick(doc) {
     if (doc.status === 'tc_generated') {
       navigate(`/review/${doc.id}`)
+    } else if (doc.status === 'analyzed') {
+      navigate(`/tree/${doc.id}`)
     }
   }
 
@@ -88,6 +101,32 @@ export default function DocumentsPage() {
         <div className="page-header">
           <h1>{project?.name || '프로젝트'}</h1>
           <p>기획서 PDF를 업로드하면 AI가 테스트케이스를 자동 생성합니다</p>
+        </div>
+
+        {/* 레벨 선택 */}
+        <div className="card" style={{ marginBottom: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: '#374151', whiteSpace: 'nowrap' }}>TC 생성 레벨</span>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {[1, 2, 3, 4, 5].map(lv => (
+                <button
+                  key={lv}
+                  onClick={() => setTcLevel(lv)}
+                  style={{
+                    width: 36, height: 36, borderRadius: 8, border: '1.5px solid',
+                    borderColor: tcLevel === lv ? '#2563eb' : '#d1d5db',
+                    background: tcLevel === lv ? '#2563eb' : '#fff',
+                    color: tcLevel === lv ? '#fff' : '#6b7280',
+                    fontWeight: 700, fontSize: 14, cursor: 'pointer',
+                  }}
+                >{lv}</button>
+              ))}
+            </div>
+            <span style={{ fontSize: 13, color: '#6b7280' }}>
+              <span style={{ color: '#111827', fontWeight: 500 }}>{LEVEL_INFO[tcLevel].label}</span>
+              {' · '}{LEVEL_INFO[tcLevel].desc}
+            </span>
+          </div>
         </div>
 
         <div className="card">
@@ -129,6 +168,7 @@ export default function DocumentsPage() {
                 <tr>
                   <th>파일명</th>
                   <th>페이지</th>
+                  <th>레벨</th>
                   <th>상태</th>
                   <th>업로드일</th>
                 </tr>
@@ -146,9 +186,14 @@ export default function DocumentsPage() {
                     </td>
                     <td>{doc.total_pages}p</td>
                     <td>
+                      <span style={{ fontSize: 12, color: '#6b7280' }}>
+                        Lv.{doc.tc_level || 2} {LEVEL_INFO[doc.tc_level || 2]?.label}
+                      </span>
+                    </td>
+                    <td>
                       <span className={`status-badge status-${doc.status}`}>
                         {STATUS_LABEL[doc.status] || doc.status}
-                        {(doc.status === 'tc_generating' || doc.status === 'uploaded') && (
+                        {['tc_generating', 'uploaded', 'analyzing'].includes(doc.status) && (
                           <span style={{ marginLeft: 6 }}>⟳</span>
                         )}
                       </span>

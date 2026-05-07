@@ -85,7 +85,7 @@ def get_tc_summary(document_id: int, db: Session = Depends(get_db)):
     for tc in testcases:
         type_dist[tc.tc_type.value] = type_dist.get(tc.tc_type.value, 0) + 1
         priority_dist[tc.priority.value] = priority_dist.get(tc.priority.value, 0) + 1
-        rs = tc.review_status.value if tc.review_status else "pending"
+        rs = tc.review_status if tc.review_status else "pending"
         review_dist[rs] = review_dist.get(rs, 0) + 1
 
     return {
@@ -195,6 +195,53 @@ def regenerate_testcases(document_id: int, db: Session = Depends(get_db)):
         print(f"[TC 이력 갱신 실패] {e}")
 
     return {"regenerated": updated, "total": len(tcs)}
+
+
+@router.post("/document/{document_id}/playwright")
+def generate_playwright(
+    document_id: int,
+    domain: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """TC 목록으로 Playwright 테스트 스크립트(.py) 생성 후 다운로드"""
+    from app.services.playwright_generator import generate_playwright_script
+
+    doc = db.query(Document).filter(Document.id == document_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="문서를 찾을 수 없습니다")
+
+    testcases = db.query(TestCase).filter(
+        TestCase.document_id == document_id,
+        TestCase.review_status != ReviewStatus.DELETED,
+    ).order_by(TestCase.tc_id).all()
+
+    if not testcases:
+        raise HTTPException(status_code=404, detail="생성된 TC가 없습니다")
+
+    project = db.query(Project).filter(Project.id == doc.project_id).first()
+    project_name = project.name if project else "Unknown"
+
+    result = generate_playwright_script(
+        testcases=testcases,
+        project_name=project_name,
+        doc_name=doc.original_filename,
+        output_path=settings.REPORT_DIR,
+        domain=domain,
+        base_url=settings.XPERP_BASE_URL,
+    )
+
+    if not result["path"]:
+        raise HTTPException(status_code=500, detail="스크립트 생성 실패")
+
+    return FileResponse(
+        path=result["path"],
+        filename=result["filename"],
+        media_type="text/x-python",
+        headers={
+            "X-TC-Count": str(result["tc_count"]),
+            "X-Categories": str(result["categories"]),
+        },
+    )
 
 
 @router.get("/document/{document_id}/export")

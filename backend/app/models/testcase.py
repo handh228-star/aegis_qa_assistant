@@ -55,7 +55,7 @@ class TestCase(Base):
     priority = Column(Enum(TCPriority), default=TCPriority.MEDIUM)
     status = Column(Enum(TCStatus), default=TCStatus.DRAFT)
     change_type = Column(String(50), default="unknown", nullable=True)
-    review_status = Column(Enum(ReviewStatus), default=ReviewStatus.PENDING)
+    review_status = Column(String(50), default="pending", nullable=True)
     review_note = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
