@@ -121,7 +121,7 @@ export default function ProjectsPage() {
                   {p.description && <p>{p.description}</p>}
                   <div className="meta" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontSize: 11, color: '#9ca3af' }}>
-                      {new Date(p.created_at).toLocaleDateString('ko-KR')}
+                      {new Date(p.created_at + 'Z').toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' })}
                     </span>
                     {p.ruleset_id && (() => {
                       const rs = rulesets.find(r => r.id === p.ruleset_id)

@@ -28,8 +28,11 @@ class Document(Base):
     total_pages = Column(Integer, default=0)
     tc_level = Column(Integer, default=3)
     status = Column(Enum(DocumentStatus), default=DocumentStatus.UPLOADED)
-    menu_tree = Column(Text, nullable=True)   # JSON 메뉴트리
+    menu_tree = Column(Text, nullable=True)
     error_message = Column(Text, nullable=True)
+    progress_current = Column(Integer, default=0, nullable=True)
+    progress_total = Column(Integer, default=0, nullable=True)
+    tc_started_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     project = relationship("Project", back_populates="documents")

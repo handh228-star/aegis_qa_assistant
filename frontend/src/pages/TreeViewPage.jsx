@@ -2,6 +2,11 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useParams, Link } from 'react-router-dom'
 import { api } from '../api'
 
+function formatDuration(seconds) {
+  if (seconds < 60) return `${seconds}초`
+  return `${Math.floor(seconds / 60)}분 ${seconds % 60}초`
+}
+
 const CHANGE_TYPE_LABEL = {
   new_feature: { label: '신규', color: '#16a34a', bg: '#dcfce7' },
   modification: { label: '수정', color: '#2563eb', bg: '#dbeafe' },
@@ -109,12 +114,17 @@ export default function TreeViewPage() {
   const [tree, setTree] = useState(null)
   const [excluded, setExcluded] = useState(new Set())
   const [generating, setGenerating] = useState(false)
+  const [progress, setProgress] = useState({ current: 0, total: 0, startedAt: null, elapsed: 0 })
   const [error, setError] = useState(null)
   const pollingRef = useRef(null)
+  const elapsedRef = useRef(null)
 
   useEffect(() => {
     loadTree()
-    return () => clearInterval(pollingRef.current)
+    return () => {
+      clearInterval(pollingRef.current)
+      clearInterval(elapsedRef.current)
+    }
   }, [documentId])
 
   async function loadTree() {
@@ -150,15 +160,27 @@ export default function TreeViewPage() {
       }
       await api.generateTc(documentId)
 
+      const startTime = Date.now()
+      elapsedRef.current = setInterval(() => {
+        setProgress(p => ({ ...p, elapsed: Math.floor((Date.now() - startTime) / 1000) }))
+      }, 1000)
+
       // TC 생성 완료까지 폴링
       pollingRef.current = setInterval(async () => {
         try {
           const { data } = await api.getDocumentStatus(documentId)
+          setProgress(p => ({
+            ...p,
+            current: data.progress_current || 0,
+            total: data.progress_total || 0,
+          }))
           if (data.status === 'tc_generated') {
             clearInterval(pollingRef.current)
+            clearInterval(elapsedRef.current)
             navigate(`/review/${documentId}`)
           } else if (data.status === 'failed') {
             clearInterval(pollingRef.current)
+            clearInterval(elapsedRef.current)
             setError('TC 생성 중 오류가 발생했습니다: ' + (data.error_message || ''))
             setGenerating(false)
           }
@@ -235,11 +257,37 @@ export default function TreeViewPage() {
         )}
 
         {generating && (
-          <div style={{ padding: 16, background: '#eff6ff', borderRadius: 8, color: '#2563eb',
-            marginBottom: 16, fontSize: 14, display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div className="spinner" style={{ width: 18, height: 18, borderTopColor: '#2563eb',
-              borderColor: '#bfdbfe', flexShrink: 0 }} />
-            TC를 생성하고 있습니다. 기능 수에 따라 수 분이 소요됩니다...
+          <div style={{ padding: 16, background: '#eff6ff', borderRadius: 8, marginBottom: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+              <div className="spinner" style={{ width: 18, height: 18, borderTopColor: '#2563eb',
+                borderColor: '#bfdbfe', flexShrink: 0 }} />
+              <span style={{ fontSize: 14, color: '#2563eb', fontWeight: 600 }}>TC 생성 중</span>
+              <span style={{ fontSize: 13, color: '#6b7280', marginLeft: 'auto' }}>
+                {progress.elapsed > 0 && `${formatDuration(progress.elapsed)} 경과`}
+              </span>
+            </div>
+            {progress.total > 0 ? (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#374151', marginBottom: 4 }}>
+                  <span>기능 <strong>{progress.current}</strong> / {progress.total} 처리 중</span>
+                  <span>{Math.round((progress.current / progress.total) * 100)}%</span>
+                </div>
+                <div style={{ height: 8, background: '#bfdbfe', borderRadius: 4, overflow: 'hidden' }}>
+                  <div style={{
+                    height: '100%', background: '#2563eb', borderRadius: 4,
+                    width: `${Math.round((progress.current / progress.total) * 100)}%`,
+                    transition: 'width 0.5s ease',
+                  }} />
+                </div>
+                {progress.current > 0 && progress.elapsed > 0 && (
+                  <div style={{ fontSize: 11, color: '#6b7280', marginTop: 4, textAlign: 'right' }}>
+                    약 {formatDuration(Math.round((progress.elapsed / progress.current) * (progress.total - progress.current)))} 남음
+                  </div>
+                )}
+              </>
+            ) : (
+              <div style={{ fontSize: 13, color: '#6b7280' }}>기능 목록 준비 중...</div>
+            )}
           </div>
         )}
 

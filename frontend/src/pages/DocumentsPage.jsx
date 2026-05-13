@@ -1,6 +1,72 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate, useParams, Link } from 'react-router-dom'
 import { api } from '../api'
+
+function useElapsed(startedAt) {
+  const [elapsed, setElapsed] = useState(0)
+  useEffect(() => {
+    if (!startedAt) return
+    const start = new Date(startedAt + 'Z').getTime()
+    const tick = () => setElapsed(Math.floor((Date.now() - start) / 1000))
+    tick()
+    const id = setInterval(tick, 1000)
+    return () => clearInterval(id)
+  }, [startedAt])
+  return elapsed
+}
+
+function formatDuration(seconds) {
+  if (seconds < 60) return `${seconds}초`
+  return `${Math.floor(seconds / 60)}분 ${seconds % 60}초`
+}
+
+function ProgressCell({ doc }) {
+  const elapsed = useElapsed(
+    ['tc_generating', 'tc_retrying'].includes(doc.status) ? doc.tc_started_at : null
+  )
+  const cur = doc.progress_current || 0
+  const total = doc.progress_total || 0
+  const pct = total > 0 ? Math.round((cur / total) * 100) : 0
+
+  if (!['tc_generating', 'tc_retrying'].includes(doc.status)) {
+    return (
+      <span className={`status-badge status-${doc.status}`}>
+        {STATUS_LABEL[doc.status] || doc.status}
+        {['uploaded', 'analyzing'].includes(doc.status) && <span style={{ marginLeft: 6 }}>⟳</span>}
+      </span>
+    )
+  }
+
+  const eta = cur > 0 && elapsed > 0
+    ? formatDuration(Math.round((elapsed / cur) * (total - cur)))
+    : null
+
+  return (
+    <div style={{ minWidth: 160 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#6b7280', marginBottom: 3 }}>
+        <span style={{ color: '#2563eb', fontWeight: 600 }}>
+          TC 생성중 {cur > 0 && total > 0 ? `${cur}/${total}` : ''}
+        </span>
+        <span>{elapsed > 0 ? formatDuration(elapsed) + ' 경과' : ''}</span>
+      </div>
+      <div style={{ height: 6, background: '#e5e7eb', borderRadius: 3, overflow: 'hidden' }}>
+        <div style={{
+          height: '100%', borderRadius: 3,
+          background: pct > 0 ? '#2563eb' : '#93c5fd',
+          width: pct > 0 ? `${pct}%` : '100%',
+          transition: 'width 0.5s ease',
+          animation: pct === 0 ? 'pulse 1.5s ease-in-out infinite' : 'none',
+        }} />
+      </div>
+      {pct > 0 && (
+        <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 2, display: 'flex', justifyContent: 'space-between' }}>
+          <span>{pct}%</span>
+          {eta && <span>약 {eta} 남음</span>}
+        </div>
+      )}
+    </div>
+  )
+}
 
 const STATUS_LABEL = {
   uploaded: '업로드됨',
@@ -191,15 +257,10 @@ export default function DocumentsPage() {
                       </span>
                     </td>
                     <td>
-                      <span className={`status-badge status-${doc.status}`}>
-                        {STATUS_LABEL[doc.status] || doc.status}
-                        {['tc_generating', 'uploaded', 'analyzing'].includes(doc.status) && (
-                          <span style={{ marginLeft: 6 }}>⟳</span>
-                        )}
-                      </span>
+                      <ProgressCell doc={doc} />
                     </td>
                     <td style={{ color: '#9ca3af', fontSize: 12 }}>
-                      {new Date(doc.created_at).toLocaleString('ko-KR')}
+                      {new Date(doc.created_at + 'Z').toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}
                     </td>
                   </tr>
                 ))}

@@ -170,7 +170,7 @@ def _generate_content_with_retry(prompt: str, max_retries: int = 3) -> str:
                 raise
 
 
-def generate_testcases(features: List[Dict], use_rag: bool = True, tc_level: int = 2, ruleset=None) -> Dict:
+def generate_testcases(features: List[Dict], use_rag: bool = True, tc_level: int = 2, ruleset=None, on_progress=None) -> Dict:
     from app.services.rag_service import build_rag_context
 
     level_cfg = TC_LEVEL_CONFIG.get(tc_level, TC_LEVEL_CONFIG[2])
@@ -220,6 +220,9 @@ def generate_testcases(features: List[Dict], use_rag: bool = True, tc_level: int
 
         all_testcases.extend(tcs)
         print(f"  → {len(tcs)}개 생성 (누적 {len(all_testcases)}개)")
+
+        if on_progress:
+            on_progress(i + 1, len(features), len(all_testcases))
 
     return {"testcases": all_testcases}
 
@@ -367,13 +370,13 @@ def _collect_leaf_nodes(nodes: List[Dict], parent_path: str = "") -> List[Dict]:
     return features
 
 
-def generate_tc_from_tree(tree: Dict, tc_level: int = 2, ruleset=None) -> Dict:
+def generate_tc_from_tree(tree: Dict, tc_level: int = 2, ruleset=None, on_progress=None) -> Dict:
     """메뉴트리를 기반으로 TC 생성 (PDF 재분석 없음)"""
     features = _collect_leaf_nodes(tree.get("tree", []))
     if not features:
         raise ValueError("메뉴트리에 기능이 없습니다.")
     print(f"[트리 기반 TC생성] {len(features)}개 기능 추출, 룰셋: {ruleset.name if ruleset else '없음'}")
-    tc_result = generate_testcases(features, tc_level=tc_level, ruleset=ruleset)
+    tc_result = generate_testcases(features, tc_level=tc_level, ruleset=ruleset, on_progress=on_progress)
     return {
         "features": features,
         "testcases": tc_result.get("testcases", []),

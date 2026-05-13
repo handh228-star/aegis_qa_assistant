@@ -26,6 +26,9 @@ def init_db():
         # documents 테이블 신규 컬럼
         for stmt in [
             "ALTER TABLE documents ADD COLUMN tc_level INTEGER DEFAULT 2",
+            "ALTER TABLE documents ADD COLUMN progress_current INTEGER DEFAULT 0",
+            "ALTER TABLE documents ADD COLUMN progress_total INTEGER DEFAULT 0",
+            "ALTER TABLE documents ADD COLUMN tc_started_at DATETIME",
         ]:
             try:
                 conn.execute(text(stmt))

@@ -26,8 +26,11 @@ class DocumentResponse(BaseModel):
     project_id: int
     original_filename: str
     total_pages: int
-    tc_level: int = 2
+    tc_level: int = 3
     status: str
+    progress_current: int = 0
+    progress_total: int = 0
+    tc_started_at: Optional[datetime] = None
     created_at: datetime
 
     class Config:
@@ -121,12 +124,27 @@ def _process_document(document_id: int, tree_json: str = None):
 
         tc_level = doc.tc_level or 3
         doc.status = DocumentStatus.TC_GENERATING
+        doc.progress_current = 0
+        doc.progress_total = 0
+        doc.tc_started_at = datetime.utcnow()
         db.commit()
+
+        def update_progress(current, total, tc_count):
+            try:
+                _db = SessionLocal()
+                _doc = _db.query(Document).filter(Document.id == document_id).first()
+                if _doc:
+                    _doc.progress_current = current
+                    _doc.progress_total = total
+                    _db.commit()
+                _db.close()
+            except Exception:
+                pass
 
         ruleset = _get_ruleset(db, document_id)
         if doc.menu_tree:
             tree = json.loads(doc.menu_tree)
-            result = generate_tc_from_tree(tree, tc_level=tc_level, ruleset=ruleset)
+            result = generate_tc_from_tree(tree, tc_level=tc_level, ruleset=ruleset, on_progress=update_progress)
         else:
             result = generate_tc_from_pdf(doc.file_path, tc_level=tc_level)
 
@@ -346,4 +364,7 @@ def get_document_status(document_id: int, db: Session = Depends(get_db)):
         "tc_level": doc.tc_level or 3,
         "tc_count": tc_count,
         "error_message": doc.error_message,
+        "progress_current": doc.progress_current or 0,
+        "progress_total": doc.progress_total or 0,
+        "tc_started_at": doc.tc_started_at.isoformat() if doc.tc_started_at else None,
     }
