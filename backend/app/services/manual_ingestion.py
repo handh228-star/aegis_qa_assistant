@@ -101,16 +101,49 @@ class SimpleVectorStore:
 
 
 def _get_embedding_fn():
+    """Embedding 함수를 반환한다.
+
+    - 진짜 배치 호출: embed_content(contents=[...])로 묶어서 호출하여 API 호출 수를 줄임.
+    - 재시도: 429(rate limit) / 503 / UNAVAILABLE 발생 시 지수 백오프 후 재시도.
+    - 배치 사이즈는 보수적으로 100. 안전하게 quota 회피.
+    """
+    import time
+
     client = genai.Client(api_key=settings.GOOGLE_API_KEY)
+    BATCH = 100
+    MAX_RETRIES = 4
+
+    def _embed_batch(chunk: List[str]) -> List[List[float]]:
+        wait = 30
+        last_err = None
+        for attempt in range(MAX_RETRIES):
+            try:
+                result = client.models.embed_content(
+                    model=settings.GEMINI_EMBEDDING_MODEL,
+                    contents=chunk,
+                )
+                # embeddings는 contents 순서와 동일한 리스트
+                return [list(e.values) for e in result.embeddings]
+            except Exception as e:
+                err = str(e)
+                last_err = e
+                is_transient = (
+                    "429" in err or "RESOURCE_EXHAUSTED" in err
+                    or "503" in err or "UNAVAILABLE" in err
+                )
+                if is_transient and attempt < MAX_RETRIES - 1:
+                    print(f"  [임베딩 재시도 {attempt+1}/{MAX_RETRIES-1}] {err[:80]} → {wait}초 대기...")
+                    time.sleep(wait)
+                    wait = min(wait * 2, 120)
+                else:
+                    raise
+        raise last_err  # pragma: no cover
 
     def embed(texts: List[str]) -> List[List[float]]:
-        results = []
-        for text in texts:
-            result = client.models.embed_content(
-                model=settings.GEMINI_EMBEDDING_MODEL,
-                contents=text,
-            )
-            results.append(list(result.embeddings[0].values))
+        results: List[List[float]] = []
+        for i in range(0, len(texts), BATCH):
+            chunk = texts[i:i + BATCH]
+            results.extend(_embed_batch(chunk))
         return results
 
     return embed

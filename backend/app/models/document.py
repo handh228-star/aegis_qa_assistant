@@ -29,6 +29,7 @@ class Document(Base):
     tc_level = Column(Integer, default=3)
     status = Column(Enum(DocumentStatus), default=DocumentStatus.UPLOADED)
     menu_tree = Column(Text, nullable=True)
+    state_inventory = Column(Text, nullable=True)  # 상태 매트릭스 (JSON 직렬화): 권한·코드 상태·이력 등 도메인 상태 차원
     error_message = Column(Text, nullable=True)
     progress_current = Column(Integer, default=0, nullable=True)
     progress_total = Column(Integer, default=0, nullable=True)

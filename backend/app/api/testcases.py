@@ -17,6 +17,7 @@ router = APIRouter(prefix="/testcases", tags=["testcases"])
 class TestCaseUpdate(BaseModel):
     title: Optional[str] = None
     objective: Optional[str] = None
+    spec_page: Optional[str] = None
     preconditions: Optional[List[str]] = None
     steps: Optional[List[dict]] = None
     expected_result: Optional[str] = None
@@ -37,6 +38,7 @@ class TestCaseResponse(BaseModel):
     category: str
     title: str
     objective: str
+    spec_page: Optional[str] = None
     preconditions: Optional[List[str]]
     steps: List[dict]
     expected_result: str
@@ -154,6 +156,7 @@ def regenerate_testcases(document_id: int, db: Session = Depends(get_db)):
                 "category": tc.category,
                 "title": tc.title,
                 "objective": tc.objective,
+                "spec_page": tc.spec_page or "",
                 "tc_type": tc.tc_type.value,
                 "priority": tc.priority.value,
                 "preconditions": tc.preconditions or [],
@@ -163,6 +166,9 @@ def regenerate_testcases(document_id: int, db: Session = Depends(get_db)):
             new_data = regenerate_tc(tc_data, tc.review_note or "")
             tc.title = new_data.get("title", tc.title)
             tc.objective = new_data.get("objective", tc.objective)
+            new_spec_page = (str(new_data.get("spec_page") or "").strip() or None)
+            if new_spec_page is not None:
+                tc.spec_page = new_spec_page
             tc.preconditions = new_data.get("preconditions", tc.preconditions)
             tc.steps = new_data.get("steps", tc.steps)
             tc.expected_result = new_data.get("expected_result", tc.expected_result)

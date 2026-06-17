@@ -2,18 +2,10 @@ import { useState, useEffect } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { api } from '../api'
 
-const CHANGE_TYPE_COLOR = {
-  new_feature:  { color: '#16a34a', bg: '#dcfce7', label: '신규' },
-  modification: { color: '#2563eb', bg: '#dbeafe', label: '수정' },
-  bug_fix:      { color: '#dc2626', bg: '#fee2e2', label: '버그수정' },
-  unknown:      { color: '#6b7280', bg: '#f3f4f6', label: '일반' },
-}
-
 function TreePanel({ nodes, depth = 0 }) {
   return (
     <div style={{ marginLeft: depth * 16 }}>
       {nodes.map(node => {
-        const ct = CHANGE_TYPE_COLOR[node.change_type] || CHANGE_TYPE_COLOR.unknown
         const hasChildren = node.children && node.children.length > 0
         return (
           <div key={node.id} style={{ marginBottom: 4 }}>
@@ -24,13 +16,9 @@ function TreePanel({ nodes, depth = 0 }) {
                 {hasChildren ? '▸' : '•'}
               </span>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                  <span style={{ fontWeight: depth === 0 ? 700 : 500, fontSize: depth === 0 ? 14 : 13 }}>
-                    {node.name}
-                  </span>
-                  <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 8,
-                    color: ct.color, background: ct.bg }}>{ct.label}</span>
-                </div>
+                <span style={{ fontWeight: depth === 0 ? 700 : 500, fontSize: depth === 0 ? 14 : 13 }}>
+                  {node.name}
+                </span>
                 {node.description && (
                   <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>{node.description}</div>
                 )}
@@ -59,13 +47,12 @@ function TreePanel({ nodes, depth = 0 }) {
 const TYPE_LABEL = { positive: '정상', negative: '비정상', boundary: '경계값', exception: '예외' }
 const PRIORITY_LABEL = { high: 'HIGH', medium: 'MED', low: 'LOW' }
 const REVIEW_LABEL = { pending: '대기', approved: '승인', needs_revision: '수정요청', admin_required: '관리자확인', deleted: '삭제' }
-const CHANGE_TYPE_LABEL = { new_feature: '신규', modification: '수정', bug_fix: '버그픽스', unknown: '-' }
 const LEVEL_INFO = {
-  1: { label: '빠른 검증',  target: 100 },
-  2: { label: '일반',       target: 200 },
-  3: { label: '꼼꼼하게',   target: 400 },
-  4: { label: '심층',       target: 800 },
-  5: { label: '완전 망라',  target: 1600 },
+  1: { label: '핵심 검증' },
+  2: { label: '표준 검증' },
+  3: { label: '정밀 검증' },
+  4: { label: '심층 검증' },
+  5: { label: '전수 검증' },
 }
 
 function ReviewModal({ tc, onClose, onSave }) {
@@ -96,7 +83,24 @@ function TCRow({ tc, expanded, onToggle, onApprove, onRevise, onAdmin, onDelete 
   return (
     <>
       <tr className={`tc-row ${expanded ? 'expanded' : ''}`} onClick={onToggle}>
-        <td style={{ color: '#9ca3af', fontFamily: 'monospace', fontSize: 12 }}>{tc.tc_id}</td>
+        <td style={{
+          color: '#9ca3af', fontFamily: 'monospace', fontSize: 12,
+          width: 72, minWidth: 72, maxWidth: 72,
+          verticalAlign: 'top', whiteSpace: 'nowrap',
+        }}>
+          <div>{tc.tc_id}</div>
+          {tc.spec_page && (
+            <div
+              title={`기획서 페이지: ${tc.spec_page}`}
+              style={{
+                display: 'inline-block', marginTop: 3, padding: '1px 6px',
+                maxWidth: 60, overflow: 'hidden', textOverflow: 'ellipsis',
+                fontSize: 10, fontWeight: 600, color: '#6366f1',
+                background: '#eef2ff', borderRadius: 4,
+              }}
+            >p.{tc.spec_page}</div>
+          )}
+        </td>
         <td style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           <span title={tc.category}>{tc.category}</span>
         </td>
@@ -136,14 +140,6 @@ function TCRow({ tc, expanded, onToggle, onApprove, onRevise, onAdmin, onDelete 
           <td colSpan={7}>
             <div className="detail-grid">
               <div>
-                {tc.change_type && tc.change_type !== 'unknown' && (
-                  <div className="detail-section" style={{ marginBottom: 14 }}>
-                    <h4>변경 유형</h4>
-                    <span className={`badge badge-change-${tc.change_type}`}>
-                      {CHANGE_TYPE_LABEL[tc.change_type]}
-                    </span>
-                  </div>
-                )}
                 <div className="detail-section" style={{ marginBottom: 14 }}>
                   <h4>목적</h4>
                   <p>{tc.objective}</p>
@@ -196,7 +192,7 @@ export default function TCReviewPage() {
   const [tcs, setTcs] = useState([])
   const [summary, setSummary] = useState(null)
   const [docInfo, setDocInfo] = useState(null)
-  const [filters, setFilters] = useState({ tc_type: '', priority: '', review_status: '', change_type: '' })
+  const [filters, setFilters] = useState({ tc_type: '', priority: '', review_status: '' })
   const [expandedId, setExpandedId] = useState(null)
   const [modalTc, setModalTc] = useState(null)
   const [isRegenerating, setIsRegenerating] = useState(false)
@@ -294,7 +290,6 @@ export default function TCReviewPage() {
     if (filters.tc_type && tc.tc_type !== filters.tc_type) return false
     if (filters.priority && tc.priority !== filters.priority) return false
     if (filters.review_status && tc.review_status !== filters.review_status) return false
-    if (filters.change_type && tc.change_type !== filters.change_type) return false
     return true
   })
 
@@ -412,12 +407,6 @@ export default function TCReviewPage() {
           {['pending', 'approved', 'needs_revision', 'admin_required', 'deleted'].map(r => (
             <FilterChip key={r} field="review_status" value={r} label={REVIEW_LABEL[r]} />
           ))}
-          <div className="filter-sep" />
-          <span className="filter-label">변경유형</span>
-          <FilterChip field="change_type" value="" label="전체" />
-          {['new_feature', 'modification', 'bug_fix'].map(c => (
-            <FilterChip key={c} field="change_type" value={c} label={CHANGE_TYPE_LABEL[c]} />
-          ))}
         </div>
 
         {/* TC 테이블 */}
@@ -468,7 +457,7 @@ export default function TCReviewPage() {
               const info = LEVEL_INFO[lv]
               return (
                 <span style={{ marginLeft: 12, color: '#9ca3af' }}>
-                  · 생성 레벨 {lv} ({info?.label}) · 참고 목표 ~{info?.target}개
+                  · 생성 레벨 {lv} ({info?.label})
                 </span>
               )
             })()}

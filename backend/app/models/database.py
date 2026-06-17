@@ -29,6 +29,7 @@ def init_db():
             "ALTER TABLE documents ADD COLUMN progress_current INTEGER DEFAULT 0",
             "ALTER TABLE documents ADD COLUMN progress_total INTEGER DEFAULT 0",
             "ALTER TABLE documents ADD COLUMN tc_started_at DATETIME",
+            "ALTER TABLE documents ADD COLUMN state_inventory TEXT",
         ]:
             try:
                 conn.execute(text(stmt))
@@ -41,6 +42,7 @@ def init_db():
             ("review_status", "VARCHAR DEFAULT 'pending'"),
             ("review_note", "TEXT"),
             ("change_type", "VARCHAR DEFAULT 'unknown'"),
+            ("spec_page", "VARCHAR(50)"),
         ]:
             try:
                 conn.execute(text(f"ALTER TABLE testcases ADD COLUMN {col} {definition}"))

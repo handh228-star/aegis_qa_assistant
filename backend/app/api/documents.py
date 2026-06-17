@@ -62,6 +62,7 @@ def _save_testcases(db, doc, result):
             category=tc_data.get("category", "기타"),
             title=tc_data.get("title", ""),
             objective=tc_data.get("objective", ""),
+            spec_page=(str(tc_data.get("spec_page") or "").strip() or None),
             preconditions=tc_data.get("preconditions", []),
             steps=tc_data.get("steps", []),
             expected_result=tc_data.get("expected_result", ""),
@@ -96,8 +97,24 @@ def _analyze_document(document_id: int):
         db.commit()
 
         ruleset = _get_ruleset(db, document_id)
-        tree = build_menu_tree(doc.file_path, ruleset=ruleset)
+        tree = build_menu_tree(doc.file_path, ruleset=ruleset, original_filename=doc.original_filename)
         doc.menu_tree = json.dumps(tree, ensure_ascii=False)
+
+        # 상태 매트릭스(권한·코드 상태·이력 등 도메인 상태 차원) 추출 — 실패해도 진행
+        from app.services.tc_generator import extract_state_inventory
+        try:
+            state_inv = extract_state_inventory(
+                doc.file_path,
+                original_filename=doc.original_filename,
+                ruleset=ruleset,
+            )
+            doc.state_inventory = json.dumps(state_inv, ensure_ascii=False)
+            n_dims = len(state_inv.get("state_dimensions", []))
+            print(f"[상태 매트릭스] {n_dims}개 차원 도출")
+        except Exception as e:
+            print(f"[상태 매트릭스 추출 실패 — 무시] {e}")
+            doc.state_inventory = json.dumps({"state_dimensions": []}, ensure_ascii=False)
+
         doc.status = DocumentStatus.ANALYZED
         doc.error_message = None
         db.commit()
@@ -142,9 +159,19 @@ def _process_document(document_id: int, tree_json: str = None):
                 pass
 
         ruleset = _get_ruleset(db, document_id)
+        state_inventory = None
+        if doc.state_inventory:
+            try:
+                state_inventory = json.loads(doc.state_inventory)
+            except Exception:
+                state_inventory = None
+
         if doc.menu_tree:
             tree = json.loads(doc.menu_tree)
-            result = generate_tc_from_tree(tree, tc_level=tc_level, ruleset=ruleset, on_progress=update_progress)
+            result = generate_tc_from_tree(
+                tree, tc_level=tc_level, ruleset=ruleset,
+                on_progress=update_progress, state_inventory=state_inventory,
+            )
         else:
             result = generate_tc_from_pdf(doc.file_path, tc_level=tc_level)
 
@@ -237,6 +264,20 @@ def update_tree(document_id: int, tree: Any, db: Session = Depends(get_db)):
     return {"message": "저장되었습니다"}
 
 
+@router.get("/{document_id}/state-inventory")
+def get_state_inventory(document_id: int, db: Session = Depends(get_db)):
+    """상태 매트릭스(권한·코드 상태·이력 등 도메인 상태 차원) 조회"""
+    doc = db.query(Document).filter(Document.id == document_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="문서를 찾을 수 없습니다")
+    if not doc.state_inventory:
+        return {"state_dimensions": []}
+    try:
+        return json.loads(doc.state_inventory)
+    except Exception:
+        return {"state_dimensions": []}
+
+
 @router.get("/{document_id}/tree/export")
 def export_tree_excel(document_id: int, db: Session = Depends(get_db)):
     """메뉴트리를 Excel로 내보내기"""
@@ -250,10 +291,30 @@ def export_tree_excel(document_id: int, db: Session = Depends(get_db)):
 
     tree_data = json.loads(doc.menu_tree)
 
+    # 리프 노드 ↔ TC 매핑 (category = 리프 전체 경로). 삭제 예정 TC 제외.
+    tcs = (
+        db.query(TestCase)
+        .filter(TestCase.document_id == document_id)
+        .filter((TestCase.review_status != "deleted") | (TestCase.review_status.is_(None)))
+        .order_by(TestCase.id)
+        .all()
+    )
+    tc_by_path = {}
+    for tc in tcs:
+        tc_by_path.setdefault(tc.category, []).append(tc)
+
     CHANGE_LABEL = {
         "new_feature": "신규", "modification": "수정",
         "bug_fix": "버그수정", "unknown": "일반",
     }
+    TC_TYPE_LABEL = {"positive": "정상", "negative": "비정상",
+                     "boundary": "경계값", "exception": "예외"}
+    PRIORITY_LABEL = {"high": "높음", "medium": "중간", "low": "낮음"}
+    PRIORITY_COLOR = {"high": "dc2626", "medium": "d97706", "low": "16a34a"}
+    TC_ROW_FILL = "f9fafb"
+
+    def _enum_val(v):
+        return getattr(v, "value", v)
     DEPTH_STYLES = [
         {"fill": "1e40af", "font_color": "FFFFFF", "font_size": 12, "bold": True},   # 1단계
         {"fill": "3b82f6", "font_color": "FFFFFF", "font_size": 11, "bold": True},   # 2단계
@@ -268,8 +329,8 @@ def export_tree_excel(document_id: int, db: Session = Depends(get_db)):
     thin = Side(style="thin", color="d1d5db")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
-    headers = ["계층", "기능명", "변경유형", "설명", "검증포인트"]
-    col_widths = [8, 40, 10, 40, 50]
+    headers = ["계층", "기능명", "변경유형", "기획서페이지", "설명", "검증포인트"]
+    col_widths = [8, 40, 10, 12, 40, 50]
     for col, (h, w) in enumerate(zip(headers, col_widths), 1):
         cell = ws.cell(row=1, column=col, value=h)
         cell.font = Font(bold=True, color="FFFFFF", size=11)
@@ -281,16 +342,45 @@ def export_tree_excel(document_id: int, db: Session = Depends(get_db)):
 
     row_num = 2
 
-    def write_node(node, depth=0):
+    def write_tc_row(tc, depth):
+        """리프 노드 아래에 매핑된 TC를 하위 행으로 펼친다."""
+        nonlocal row_num
+        indent = "    " * depth
+        prio = _enum_val(tc.priority)
+        values = [
+            "TC",
+            f"{indent}└ [{tc.tc_id}] {tc.title}",
+            TC_TYPE_LABEL.get(_enum_val(tc.tc_type), ""),
+            str(tc.spec_page or "").strip(),
+            tc.objective or "",
+            tc.expected_result or "",
+        ]
+        for col, val in enumerate(values, 1):
+            cell = ws.cell(row=row_num, column=col, value=val)
+            cell.fill = PatternFill("solid", fgColor=TC_ROW_FILL)
+            color = PRIORITY_COLOR.get(prio, "374151") if col == 2 else "6b7280"
+            cell.font = Font(size=9, color=color, bold=(col == 2 and prio == "high"))
+            cell.alignment = Alignment(vertical="top", wrap_text=True,
+                                       horizontal="center" if col in (1, 3, 4) else "left")
+            cell.border = border
+        longest = max(len(tc.objective or ""), len(tc.expected_result or ""), 1)
+        ws.row_dimensions[row_num].height = max(16, (longest // 28 + 1) * 14)
+        row_num += 1
+
+    def write_node(node, depth=0, parent_path=""):
         nonlocal row_num
         style = DEPTH_STYLES[min(depth, len(DEPTH_STYLES) - 1)]
         indent = "  " * depth
+        name = node.get("name", "")
+        current_path = f"{parent_path} > {name}" if parent_path else name
         key_points = "\n".join(f"• {kp}" for kp in (node.get("key_points") or []))
+        children = node.get("children") or []
 
         values = [
             depth + 1,
-            indent + node.get("name", ""),
+            indent + name,
             CHANGE_LABEL.get(node.get("change_type", "unknown"), "일반"),
+            str(node.get("spec_page") or "").strip(),
             node.get("description", ""),
             key_points,
         ]
@@ -299,7 +389,7 @@ def export_tree_excel(document_id: int, db: Session = Depends(get_db)):
             cell.fill = PatternFill("solid", fgColor=style["fill"])
             cell.font = Font(bold=style["bold"], color=style["font_color"], size=style["font_size"])
             cell.alignment = Alignment(vertical="center", wrap_text=True,
-                                       horizontal="center" if col == 1 else "left")
+                                       horizontal="center" if col in (1, 4) else "left")
             cell.border = border
 
         if key_points:
@@ -308,8 +398,14 @@ def export_tree_excel(document_id: int, db: Session = Depends(get_db)):
             ws.row_dimensions[row_num].height = 20
 
         row_num += 1
-        for child in node.get("children") or []:
-            write_node(child, depth + 1)
+
+        if children:
+            for child in children:
+                write_node(child, depth + 1, current_path)
+        else:
+            # 리프 노드: 이 노드 경로에 매핑된 실제 TC를 하위 행으로 펼침
+            for tc in tc_by_path.get(current_path, []):
+                write_tc_row(tc, depth + 1)
 
     for node in tree_data.get("tree", []):
         write_node(node)

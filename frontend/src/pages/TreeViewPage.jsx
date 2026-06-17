@@ -7,12 +7,8 @@ function formatDuration(seconds) {
   return `${Math.floor(seconds / 60)}분 ${seconds % 60}초`
 }
 
-const CHANGE_TYPE_LABEL = {
-  new_feature: { label: '신규', color: '#16a34a', bg: '#dcfce7' },
-  modification: { label: '수정', color: '#2563eb', bg: '#dbeafe' },
-  bug_fix: { label: '버그수정', color: '#dc2626', bg: '#fee2e2' },
-  unknown: { label: '일반', color: '#6b7280', bg: '#f3f4f6' },
-}
+// 변경유형(change_type)은 트리뷰에서 시각적 노이즈가 커서 표시하지 않음.
+// 데이터는 그대로 유지되어 TCReviewPage 필터·Excel 리포트·TC 생성 전략 분기에는 적용됨.
 
 function countLeaves(nodes) {
   return nodes.reduce((acc, n) => {
@@ -21,20 +17,10 @@ function countLeaves(nodes) {
   }, 0)
 }
 
-function collectAllIds(nodes) {
-  const ids = []
-  function walk(arr) {
-    arr.forEach(n => { ids.push(n.id); if (n.children) walk(n.children) })
-  }
-  walk(nodes)
-  return ids
-}
-
 function TreeNode({ node, excluded, onToggleExclude, depth = 0 }) {
   const [open, setOpen] = useState(true)
   const hasChildren = node.children && node.children.length > 0
   const isExcluded = excluded.has(node.id)
-  const ct = CHANGE_TYPE_LABEL[node.change_type] || CHANGE_TYPE_LABEL.unknown
 
   return (
     <div style={{ marginLeft: depth * 20, marginBottom: 4 }}>
@@ -55,16 +41,17 @@ function TreeNode({ node, excluded, onToggleExclude, depth = 0 }) {
 
         {/* 내용 */}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <span style={{ fontWeight: depth === 0 ? 700 : depth === 1 ? 600 : 500,
-              fontSize: depth === 0 ? 15 : 14, color: '#111827' }}>
-              {node.name}
+          <span style={{ fontWeight: depth === 0 ? 700 : depth === 1 ? 600 : 500,
+            fontSize: depth === 0 ? 15 : 14, color: '#111827' }}>
+            {node.name}
+          </span>
+          {node.spec_page && (
+            <span title={`기획서 페이지: ${node.spec_page}`}
+              style={{ marginLeft: 8, fontSize: 11, color: '#6b7280', background: '#f3f4f6',
+                padding: '1px 7px', borderRadius: 10, border: '1px solid #e5e7eb', verticalAlign: 'middle' }}>
+              p.{node.spec_page}
             </span>
-            <span style={{ fontSize: 11, fontWeight: 600, padding: '1px 7px', borderRadius: 10,
-              color: ct.color, background: ct.bg }}>
-              {ct.label}
-            </span>
-          </div>
+          )}
           {node.description && (
             <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>{node.description}</div>
           )}

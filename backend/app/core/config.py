@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     GEMINI_MODEL_TC: str = "gemini-2.5-pro"           # TC 생성
     GEMINI_MODEL_VISION: str = "gemini-2.5-flash"     # 크롤러 화면 분석
 
+    # 폴백 모델 (primary가 503/429로 지속 실패할 때 자동 전환). 빈 문자열이면 폴백 안 함.
+    GEMINI_MODEL_EXTRACT_FALLBACK: str = "gemini-2.5-flash-lite"
+    GEMINI_MODEL_TC_FALLBACK: str = "gemini-2.5-flash-lite"
+
     DATABASE_URL: str = f"sqlite:///{BASE_DIR}/aegis_qa.db"
 
     UPLOAD_DIR: Path = BASE_DIR / "uploads"

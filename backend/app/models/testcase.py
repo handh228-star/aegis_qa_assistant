@@ -48,6 +48,7 @@ class TestCase(Base):
     category = Column(String(200), nullable=False)
     title = Column(String(500), nullable=False)
     objective = Column(Text, nullable=False)
+    spec_page = Column(String(50), nullable=True)  # 기획서 페이지 참조 (예: "5p", "8p-9p"). 추적성·근거 검증용.
     preconditions = Column(JSON, nullable=True)
     steps = Column(JSON, nullable=False)
     expected_result = Column(Text, nullable=False)
