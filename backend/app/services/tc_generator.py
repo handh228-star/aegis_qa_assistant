@@ -907,27 +907,44 @@ def linearize_flow_tree(flow_tree: Dict) -> Dict:
         preconditions = [n.get("content", "") for n in path
                          if n.get("type") == "PR" and n.get("content")]
 
+        seq = [n for n in path if n.get("type") != "PR"]  # 액션/표시 시퀀스
+        actions = [n.get("content", "") for n in seq if n.get("type") in _FLOW_ACTION_TYPES]
+        all_displays = [n.get("content", "") for n in seq if n.get("type") in ("D", "V") and n.get("content")]
+
+        # 스텝 구성: 액션 단위로 그룹화. 액션 전 표시는 진입 스텝으로 묶고, "화면 진입" 가짜 스텝은 쓰지 않음.
         steps: List[Dict] = []
+        entry_displays: List[str] = []   # 첫 액션 이전에 노출되는 표시(진입 화면 표시)
         cur = None
-        last_result = ""
-        for n in path:
+        for n in seq:
             t = n.get("type")
             content = n.get("content", "")
-            if t == "PR":
-                continue
             if t in _FLOW_ACTION_TYPES:
-                if cur:
+                if cur is None and entry_displays:
+                    steps.append({"step": len(steps) + 1,
+                                  "action": "대상 화면/팝업에 진입한다",
+                                  "expected": "\n".join(entry_displays)})
+                elif cur is not None:
                     steps.append(cur)
                 cur = {"step": len(steps) + 1, "action": content, "expected": ""}
-            elif t in ("D", "V"):
-                if content:
-                    last_result = content
+            elif t in ("D", "V") and content:
                 if cur is None:
-                    cur = {"step": len(steps) + 1, "action": "화면 진입", "expected": content}
+                    entry_displays.append(content)
                 else:
                     cur["expected"] = (cur["expected"] + "\n" + content).strip() if cur["expected"] else content
-        if cur:
+        if cur is not None:
             steps.append(cur)
+        elif entry_displays:
+            # 액션이 전혀 없는 순수 표시 확인 경로
+            steps.append({"step": 1,
+                          "action": "해당 화면/팝업의 표시 항목을 확인한다",
+                          "expected": "\n".join(entry_displays)})
+
+        # 기대결과: 마지막 스텝의 결과(없으면 경로의 마지막 표시)
+        expected_result = ""
+        if steps and steps[-1].get("expected"):
+            expected_result = steps[-1]["expected"]
+        elif all_displays:
+            expected_result = all_displays[-1]
 
         spec_page = ""
         for n in reversed(path):
@@ -935,8 +952,15 @@ def linearize_flow_tree(flow_tree: Dict) -> Dict:
                 spec_page = n["spec_page"]
                 break
 
-        leaf = path[-1]
-        title = (leaf.get("content") or "").strip()[:120] or "흐름 시나리오"
+        # 제목: 마지막 사용자 액션이 있으면 그 액션, 없으면 종단 표시
+        core = (actions[-1] if actions else (path[-1].get("content") or "")).strip()
+        core_short = core[:80] + ("…" if len(core) > 80 else "")
+        title = core_short or "흐름 시나리오"
+        # 목적: 메뉴 경로 + 핵심 동작/표시 + (대표 상태)
+        state_txt = f", {preconditions[-1]}에서" if preconditions else ""
+        verb_phrase = "동작하는지" if actions else "표시되는지"
+        objective = f"[{menu_path}]{state_txt} '{core_short}'이(가) 기획서 명세대로 {verb_phrase} 검증한다."
+
         joined = " ".join(n.get("content", "") for n in path)
         tc_type = "negative" if any(k in joined for k in ["오류", "실패", "잘못", "유효하지", "불가", "에러"]) else "positive"
 
@@ -944,13 +968,13 @@ def linearize_flow_tree(flow_tree: Dict) -> Dict:
             "tc_id": f"TC-{counter[0]:03d}",
             "category": menu_path,
             "title": title,
-            "objective": f"{menu_path} — {title}",
+            "objective": objective,
             "spec_page": spec_page,
             "tc_type": tc_type,
             "priority": "medium",
             "preconditions": preconditions,
             "steps": steps,
-            "expected_result": last_result,
+            "expected_result": expected_result,
             "change_type": "unknown",
         })
         counter[0] += 1
