@@ -22,6 +22,12 @@ export const api = {
   generateTc: (docId) => axios.post(`${BASE}/documents/${docId}/generate-tc`),
   treeExportUrl: (docId) => `${BASE}/documents/${docId}/tree/export`,
 
+  // Flow Tree (흐름 트리 — 행동 흐름 메뉴트리)
+  startFlowTree: (docId) => axios.post(`${BASE}/documents/${docId}/flow-tree`),
+  getFlowTree: (docId) => axios.get(`${BASE}/documents/${docId}/flow-tree`),
+  flowTreeExportUrl: (docId) => `${BASE}/documents/${docId}/flow-tree/export`,
+  generateTcFromFlow: (docId) => axios.post(`${BASE}/documents/${docId}/flow-tree/generate-tc`),
+
   // RuleSets
   getRulesets: () => axios.get(`${BASE}/rulesets/`),
   getRuleset: (id) => axios.get(`${BASE}/rulesets/${id}`),

@@ -95,6 +95,43 @@ function TreeNode({ node, excluded, onToggleExclude, depth = 0 }) {
   )
 }
 
+const FLOW_TYPE_STYLE = {
+  PR: { bg: '#fef3c7', fg: '#92400e' },
+  C:  { bg: '#dbeafe', fg: '#1e40af' },
+  D:  { bg: '#dcfce7', fg: '#166534' },
+  T:  { bg: '#fae8ff', fg: '#86198f' },
+  H:  { bg: '#e0e7ff', fg: '#3730a3' },
+  V:  { bg: '#fee2e2', fg: '#991b1b' },
+  DC: { bg: '#dbeafe', fg: '#1e40af' },
+  RC: { bg: '#dbeafe', fg: '#1e40af' },
+  DD: { bg: '#dbeafe', fg: '#1e40af' },
+}
+
+function FlowNode({ node, depth = 0 }) {
+  const s = FLOW_TYPE_STYLE[node.type] || { bg: '#f3f4f6', fg: '#374151' }
+  const children = node.children || []
+  return (
+    <div style={{ marginLeft: depth ? 18 : 0, marginBottom: 3 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+        <span style={{ flexShrink: 0, fontSize: 10, fontWeight: 700, color: s.fg, background: s.bg,
+          padding: '1px 6px', borderRadius: 4, minWidth: 26, textAlign: 'center' }}>
+          {node.type || '?'}
+        </span>
+        <span style={{ fontSize: 13, color: '#111827', lineHeight: 1.5 }}>
+          {node.content}
+          {node.menu_path && <span style={{ fontSize: 11, color: '#6b7280' }}> · {node.menu_path}</span>}
+          {node.spec_page && <span style={{ fontSize: 10, color: '#6366f1', marginLeft: 6 }}>p.{node.spec_page}</span>}
+        </span>
+      </div>
+      {children.length > 0 && (
+        <div style={{ marginTop: 3, borderLeft: '1px solid #e5e7eb', paddingLeft: 6 }}>
+          {children.map((ch, i) => <FlowNode key={ch.id || i} node={ch} depth={depth + 1} />)}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function TreeViewPage() {
   const { documentId } = useParams()
   const navigate = useNavigate()
@@ -103,14 +140,20 @@ export default function TreeViewPage() {
   const [generating, setGenerating] = useState(false)
   const [progress, setProgress] = useState({ current: 0, total: 0, startedAt: null, elapsed: 0 })
   const [error, setError] = useState(null)
+  const [flow, setFlow] = useState(null)       // { flow_tree, stats } | null
+  const [flowBusy, setFlowBusy] = useState(false)
+  const [flowMsg, setFlowMsg] = useState('')
   const pollingRef = useRef(null)
   const elapsedRef = useRef(null)
+  const flowPollRef = useRef(null)
 
   useEffect(() => {
     loadTree()
+    loadFlow()
     return () => {
       clearInterval(pollingRef.current)
       clearInterval(elapsedRef.current)
+      clearInterval(flowPollRef.current)
     }
   }, [documentId])
 
@@ -120,6 +163,49 @@ export default function TreeViewPage() {
       setTree(data)
     } catch (e) {
       setError('메뉴트리를 불러올 수 없습니다.')
+    }
+  }
+
+  async function loadFlow() {
+    try {
+      const { data } = await api.getFlowTree(documentId)
+      if (data.ready) setFlow(data)
+    } catch (e) { /* 아직 없음 */ }
+  }
+
+  function handleExtractFlow() {
+    setFlowBusy(true)
+    setFlowMsg('흐름 트리 추출 중... (1~2분 소요)')
+    api.startFlowTree(documentId).then(() => {
+      let tries = 0
+      flowPollRef.current = setInterval(async () => {
+        tries += 1
+        try {
+          const { data } = await api.getFlowTree(documentId)
+          if (data.ready) {
+            clearInterval(flowPollRef.current)
+            setFlow(data); setFlowBusy(false); setFlowMsg('')
+          } else if (tries > 45) {   // ~3분 초과
+            clearInterval(flowPollRef.current)
+            setFlowBusy(false); setFlowMsg('추출이 지연되거나 실패했습니다. 잠시 후 다시 시도하세요.')
+          }
+        } catch (e) { /* 무시하고 계속 폴링 */ }
+      }, 4000)
+    }).catch(e => {
+      setFlowBusy(false)
+      setFlowMsg('추출 시작 실패: ' + (e.response?.data?.detail || e.message))
+    })
+  }
+
+  async function handleGenerateTcFromFlow() {
+    setFlowBusy(true)
+    setFlowMsg('흐름 트리에서 TC 생성 중...')
+    try {
+      await api.generateTcFromFlow(documentId)
+      navigate(`/review/${documentId}`)
+    } catch (e) {
+      setFlowBusy(false)
+      setFlowMsg('TC 생성 실패: ' + (e.response?.data?.detail || e.message))
     }
   }
 
@@ -308,6 +394,65 @@ export default function TreeViewPage() {
                 borderColor: '#e5e7eb', margin: '0 auto 12px' }} />
               <p>메뉴트리를 불러오는 중...</p>
             </div>
+          ) : null}
+        </div>
+
+        {/* 흐름 트리 (행동 흐름 메뉴트리) */}
+        <div className="card" style={{ marginTop: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <div>
+              <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>흐름 트리 <span style={{ fontSize: 12, color: '#6b7280', fontWeight: 400 }}>(행동 흐름 메뉴트리 · QA 양식)</span></h2>
+              {flow?.stats && (
+                <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
+                  총 {flow.stats.total}노드 · 깊이 {flow.stats.max_depth} ·{' '}
+                  {Object.entries(flow.stats.types).map(([t, n]) => `${t} ${n}`).join(' / ')}
+                </div>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
+              {!flow ? (
+                <button onClick={handleExtractFlow} disabled={flowBusy}
+                  style={{ padding: '8px 16px', borderRadius: 8, border: 'none', fontWeight: 600, fontSize: 14,
+                    background: flowBusy ? '#9ca3af' : '#7c3aed', color: '#fff', cursor: flowBusy ? 'not-allowed' : 'pointer' }}>
+                  {flowBusy ? '추출 중 ⟳' : '흐름 트리 추출'}
+                </button>
+              ) : (
+                <>
+                  <a href={api.flowTreeExportUrl(documentId)} target="_blank" rel="noreferrer"
+                    style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid #d1d5db', background: '#fff',
+                      color: '#374151', fontWeight: 600, fontSize: 14, textDecoration: 'none' }}>
+                    📥 Excel
+                  </a>
+                  <button onClick={handleExtractFlow} disabled={flowBusy}
+                    style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid #d1d5db', background: '#fff',
+                      color: '#374151', fontWeight: 600, fontSize: 14, cursor: flowBusy ? 'not-allowed' : 'pointer' }}>
+                    재추출
+                  </button>
+                  <button onClick={handleGenerateTcFromFlow} disabled={flowBusy}
+                    style={{ padding: '8px 16px', borderRadius: 8, border: 'none', fontWeight: 700, fontSize: 14,
+                      background: flowBusy ? '#9ca3af' : '#2563eb', color: '#fff', cursor: flowBusy ? 'not-allowed' : 'pointer' }}>
+                    이 흐름트리로 TC 생성 →
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+
+          {flowMsg && (
+            <div style={{ padding: 10, background: '#f5f3ff', borderRadius: 8, color: '#6d28d9', fontSize: 13, marginBottom: 12 }}>
+              {flowBusy && <span className="spinner" style={{ width: 14, height: 14, borderTopColor: '#7c3aed', borderColor: '#ddd6fe', display: 'inline-block', marginRight: 8, verticalAlign: 'middle' }} />}
+              {flowMsg}
+            </div>
+          )}
+
+          {flow?.flow_tree?.tree ? (
+            <div style={{ maxHeight: 600, overflowY: 'auto', padding: 4 }}>
+              {flow.flow_tree.tree.map((node, i) => <FlowNode key={node.id || i} node={node} depth={0} />)}
+            </div>
+          ) : !flowBusy ? (
+            <p style={{ fontSize: 13, color: '#9ca3af', margin: 0 }}>
+              아직 흐름 트리가 없습니다. "흐름 트리 추출"을 누르면 상태→액션→표시결과 흐름으로 추출됩니다 (사람 QA 양식).
+            </p>
           ) : null}
         </div>
       </div>
