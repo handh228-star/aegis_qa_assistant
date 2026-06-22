@@ -16,7 +16,7 @@ from app.models.project import Project
 from app.models.qa_ruleset import QARuleSet
 from app.core.config import settings
 from app.services.document_parser import get_pdf_page_count
-from app.services.tc_generator import generate_tc_from_pdf, generate_tc_from_tree, build_menu_tree, build_flow_tree
+from app.services.tc_generator import generate_tc_from_pdf, generate_tc_from_tree, build_menu_tree, build_flow_tree, linearize_flow_tree
 from app.services.flow_tree_report import render_flow_tree_excel, flow_tree_stats
 
 router = APIRouter(prefix="/documents", tags=["documents"])
@@ -482,6 +482,23 @@ def export_flow_tree_excel(document_id: int, db: Session = Depends(get_db)):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename=flowtree_{document_id}.xlsx"},
     )
+
+
+@router.post("/{document_id}/flow-tree/generate-tc")
+def generate_tc_from_flow(document_id: int, db: Session = Depends(get_db)):
+    """흐름 트리를 선형화해 TC 생성 (트리=마스터, TC=파생).
+
+    기존 TC를 모두 교체한다(흐름 트리에서 재파생). 흐름 트리가 없으면 404.
+    """
+    doc = db.query(Document).filter(Document.id == document_id).first()
+    if not doc or not doc.flow_tree:
+        raise HTTPException(status_code=404, detail="흐름 트리가 없습니다. 먼저 흐름 트리를 추출하세요.")
+    result = linearize_flow_tree(json.loads(doc.flow_tree))
+    db.query(TestCase).filter(TestCase.document_id == document_id).delete()
+    _save_testcases(db, doc, result)
+    doc.status = DocumentStatus.TC_GENERATED
+    db.commit()
+    return {"message": "흐름 트리에서 TC를 생성했습니다", "count": len(result["testcases"])}
 
 
 @router.post("/{document_id}/generate-tc")

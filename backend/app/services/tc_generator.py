@@ -886,6 +886,89 @@ def build_flow_tree(pdf_path: str, ruleset=None, original_filename: str = None) 
     return result
 
 
+_FLOW_ACTION_TYPES = {"C", "T", "H", "DC", "RC", "DD"}
+
+
+def linearize_flow_tree(flow_tree: Dict) -> Dict:
+    """흐름 트리를 TC 목록으로 선형화 (설계 §5: 트리=마스터, TC=파생).
+
+    각 루트→종단(leaf) 경로 1개 = TC 1건.
+      - 경로의 PR 노드 → preconditions
+      - 액션(C/T/H/DC/RC/DD) → steps[].action, 직후 D/V → 해당 step의 expected
+      - 마지막 D/V → expected_result
+      - category = 루트 menu_path, spec_page = 경로 종단부터 첫 비어있지 않은 값
+    """
+    testcases: List[Dict] = []
+    counter = [1]
+
+    def emit(path: List[Dict]):
+        root = path[0]
+        menu_path = root.get("menu_path") or root.get("content", "")
+        preconditions = [n.get("content", "") for n in path
+                         if n.get("type") == "PR" and n.get("content")]
+
+        steps: List[Dict] = []
+        cur = None
+        last_result = ""
+        for n in path:
+            t = n.get("type")
+            content = n.get("content", "")
+            if t == "PR":
+                continue
+            if t in _FLOW_ACTION_TYPES:
+                if cur:
+                    steps.append(cur)
+                cur = {"step": len(steps) + 1, "action": content, "expected": ""}
+            elif t in ("D", "V"):
+                if content:
+                    last_result = content
+                if cur is None:
+                    cur = {"step": len(steps) + 1, "action": "화면 진입", "expected": content}
+                else:
+                    cur["expected"] = (cur["expected"] + "\n" + content).strip() if cur["expected"] else content
+        if cur:
+            steps.append(cur)
+
+        spec_page = ""
+        for n in reversed(path):
+            if n.get("spec_page"):
+                spec_page = n["spec_page"]
+                break
+
+        leaf = path[-1]
+        title = (leaf.get("content") or "").strip()[:120] or "흐름 시나리오"
+        joined = " ".join(n.get("content", "") for n in path)
+        tc_type = "negative" if any(k in joined for k in ["오류", "실패", "잘못", "유효하지", "불가", "에러"]) else "positive"
+
+        testcases.append({
+            "tc_id": f"TC-{counter[0]:03d}",
+            "category": menu_path,
+            "title": title,
+            "objective": f"{menu_path} — {title}",
+            "spec_page": spec_page,
+            "tc_type": tc_type,
+            "priority": "medium",
+            "preconditions": preconditions,
+            "steps": steps,
+            "expected_result": last_result,
+            "change_type": "unknown",
+        })
+        counter[0] += 1
+
+    def walk(node: Dict, path: List[Dict]):
+        path = path + [node]
+        children = node.get("children") or []
+        if not children:
+            emit(path)
+        else:
+            for ch in children:
+                walk(ch, path)
+
+    for root in flow_tree.get("tree", []) or []:
+        walk(root, [])
+    return {"testcases": testcases}
+
+
 def generate_tc_from_pdf(pdf_path: str, tc_level: int = 2) -> Dict:
     analysis = analyze_document(pdf_path)
     features = analysis.get("features", [])
