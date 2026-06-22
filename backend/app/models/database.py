@@ -30,6 +30,7 @@ def init_db():
             "ALTER TABLE documents ADD COLUMN progress_total INTEGER DEFAULT 0",
             "ALTER TABLE documents ADD COLUMN tc_started_at DATETIME",
             "ALTER TABLE documents ADD COLUMN state_inventory TEXT",
+            "ALTER TABLE documents ADD COLUMN flow_tree TEXT",
         ]:
             try:
                 conn.execute(text(stmt))

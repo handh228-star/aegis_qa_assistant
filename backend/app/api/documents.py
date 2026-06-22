@@ -16,7 +16,8 @@ from app.models.project import Project
 from app.models.qa_ruleset import QARuleSet
 from app.core.config import settings
 from app.services.document_parser import get_pdf_page_count
-from app.services.tc_generator import generate_tc_from_pdf, generate_tc_from_tree, build_menu_tree
+from app.services.tc_generator import generate_tc_from_pdf, generate_tc_from_tree, build_menu_tree, build_flow_tree
+from app.services.flow_tree_report import render_flow_tree_excel, flow_tree_stats
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -421,6 +422,65 @@ def export_tree_excel(document_id: int, db: Session = Depends(get_db)):
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+# ============================================================================
+# 흐름 트리(Flow Tree) — 행동 흐름 메뉴트리. menu_tree(구조적)와 별도 보관.
+# ============================================================================
+def _build_flow_tree_bg(document_id: int):
+    """백그라운드: PDF에서 흐름 트리 추출 → doc.flow_tree에 저장."""
+    from app.models.database import SessionLocal
+    db = SessionLocal()
+    try:
+        doc = db.query(Document).filter(Document.id == document_id).first()
+        if not doc:
+            return
+        ruleset = _get_ruleset(db, document_id)
+        flow = build_flow_tree(doc.file_path, ruleset=ruleset, original_filename=doc.original_filename)
+        doc.flow_tree = json.dumps(flow, ensure_ascii=False)
+        db.commit()
+        st = flow_tree_stats(flow)
+        print(f"[흐름트리 완료] doc_id={document_id}, 노드 {st['total']}개, 깊이 {st['max_depth']}, 타입 {st['types']}")
+    except Exception as e:
+        print(f"[흐름트리 실패] doc_id={document_id}: {str(e)[:200]}")
+    finally:
+        db.close()
+
+
+@router.post("/{document_id}/flow-tree")
+def start_build_flow_tree(document_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """흐름 트리 추출 시작 (백그라운드). 완료 후 GET /flow-tree 로 조회."""
+    doc = db.query(Document).filter(Document.id == document_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="문서를 찾을 수 없습니다")
+    background_tasks.add_task(_build_flow_tree_bg, document_id)
+    return {"message": "흐름 트리 추출을 시작했습니다", "document_id": document_id}
+
+
+@router.get("/{document_id}/flow-tree")
+def get_flow_tree(document_id: int, db: Session = Depends(get_db)):
+    """저장된 흐름 트리 JSON 조회 (아직 없으면 ready=False)."""
+    doc = db.query(Document).filter(Document.id == document_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="문서를 찾을 수 없습니다")
+    if not doc.flow_tree:
+        return {"ready": False}
+    flow = json.loads(doc.flow_tree)
+    return {"ready": True, "flow_tree": flow, "stats": flow_tree_stats(flow)}
+
+
+@router.get("/{document_id}/flow-tree/export")
+def export_flow_tree_excel(document_id: int, db: Session = Depends(get_db)):
+    """흐름 트리를 QA 양식 Excel 그리드로 내보내기."""
+    doc = db.query(Document).filter(Document.id == document_id).first()
+    if not doc or not doc.flow_tree:
+        raise HTTPException(status_code=404, detail="흐름 트리가 없습니다")
+    buf = render_flow_tree_excel(json.loads(doc.flow_tree))
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename=flowtree_{document_id}.xlsx"},
     )
 
 
