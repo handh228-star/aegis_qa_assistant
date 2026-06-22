@@ -16,7 +16,7 @@ from app.models.project import Project
 from app.models.qa_ruleset import QARuleSet
 from app.core.config import settings
 from app.services.document_parser import get_pdf_page_count
-from app.services.tc_generator import generate_tc_from_pdf, generate_tc_from_tree, build_menu_tree, build_flow_tree, linearize_flow_tree
+from app.services.tc_generator import generate_tc_from_pdf, generate_tc_from_tree, build_menu_tree, build_flow_tree, linearize_flow_tree, check_flow_coverage
 from app.services.flow_tree_report import render_flow_tree_excel, flow_tree_stats
 
 router = APIRouter(prefix="/documents", tags=["documents"])
@@ -482,6 +482,26 @@ def export_flow_tree_excel(document_id: int, db: Session = Depends(get_db)):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename=flowtree_{document_id}.xlsx"},
     )
+
+
+@router.post("/{document_id}/flow-tree/coverage-check")
+def flow_coverage_check(document_id: int, db: Session = Depends(get_db)):
+    """흐름 트리를 프로젝트 룰셋(tree_rules)과 대조해 누락·위반을 점검한다.
+
+    룰셋을 능동적으로 활용하는 게이트. 결과(findings)는 재추출 시 룰셋에 반영할 단서가 된다.
+    """
+    doc = db.query(Document).filter(Document.id == document_id).first()
+    if not doc or not doc.flow_tree:
+        raise HTTPException(status_code=404, detail="흐름 트리가 없습니다. 먼저 흐름 트리를 추출하세요.")
+    ruleset = _get_ruleset(db, document_id)
+    rules_text = (ruleset.tree_rules if ruleset else "") or ""
+    result = check_flow_coverage(json.loads(doc.flow_tree), rules_text)
+    return {
+        "ruleset": ruleset.name if ruleset else None,
+        "findings": result.get("findings", []),
+        "note": result.get("note"),
+        "error": result.get("error"),
+    }
 
 
 @router.post("/{document_id}/flow-tree/generate-tc")

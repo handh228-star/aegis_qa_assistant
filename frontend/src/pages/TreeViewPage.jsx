@@ -144,6 +144,8 @@ export default function TreeViewPage() {
   const [flowBusy, setFlowBusy] = useState(false)
   const [flowMsg, setFlowMsg] = useState('')
   const [view, setView] = useState('flow')     // 'flow'(마스터) | 'structural'
+  const [coverage, setCoverage] = useState(null) // 룰셋 커버리지 점검 결과 | null
+  const [covBusy, setCovBusy] = useState(false)
   const pollingRef = useRef(null)
   const elapsedRef = useRef(null)
   const flowPollRef = useRef(null)
@@ -208,6 +210,19 @@ export default function TreeViewPage() {
     } catch (e) {
       setFlowBusy(false)
       setFlowMsg('TC 생성 실패: ' + (e.response?.data?.detail || e.message))
+    }
+  }
+
+  async function handleCoverageCheck() {
+    setCovBusy(true)
+    setCoverage(null)
+    try {
+      const { data } = await api.flowCoverageCheck(documentId)
+      setCoverage(data)
+    } catch (e) {
+      setCoverage({ findings: [], error: e.response?.data?.detail || e.message })
+    } finally {
+      setCovBusy(false)
     }
   }
 
@@ -435,6 +450,12 @@ export default function TreeViewPage() {
                       color: '#374151', fontWeight: 600, fontSize: 14, cursor: flowBusy ? 'not-allowed' : 'pointer' }}>
                     재추출
                   </button>
+                  <button onClick={handleCoverageCheck} disabled={covBusy || flowBusy}
+                    title="프로젝트 룰셋 기준으로 흐름 트리의 누락·위반을 점검"
+                    style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid #fcd34d', background: '#fffbeb',
+                      color: '#b45309', fontWeight: 600, fontSize: 14, cursor: (covBusy || flowBusy) ? 'not-allowed' : 'pointer' }}>
+                    {covBusy ? '점검 중 ⟳' : '🔎 룰셋 점검'}
+                  </button>
                   <button onClick={handleGenerateTcFromFlow} disabled={flowBusy}
                     style={{ padding: '8px 16px', borderRadius: 8, border: 'none', fontWeight: 700, fontSize: 14,
                       background: flowBusy ? '#9ca3af' : '#2563eb', color: '#fff', cursor: flowBusy ? 'not-allowed' : 'pointer' }}>
@@ -449,6 +470,43 @@ export default function TreeViewPage() {
             <div style={{ padding: 10, background: '#f5f3ff', borderRadius: 8, color: '#6d28d9', fontSize: 13, marginBottom: 12 }}>
               {flowBusy && <span className="spinner" style={{ width: 14, height: 14, borderTopColor: '#7c3aed', borderColor: '#ddd6fe', display: 'inline-block', marginRight: 8, verticalAlign: 'middle' }} />}
               {flowMsg}
+            </div>
+          )}
+
+          {coverage && (
+            <div style={{ marginBottom: 12, border: '1px solid #fde68a', borderRadius: 8, overflow: 'hidden' }}>
+              <div style={{ padding: '8px 12px', background: '#fffbeb', fontSize: 13, fontWeight: 600, color: '#92400e',
+                display: 'flex', justifyContent: 'space-between' }}>
+                <span>🔎 룰셋 커버리지 점검 {coverage.ruleset && <span style={{ fontWeight: 400, color: '#b45309' }}>· {coverage.ruleset}</span>}</span>
+                <span style={{ fontWeight: 400 }}>{(coverage.findings || []).length}건</span>
+              </div>
+              <div style={{ padding: 12 }}>
+                {coverage.error ? (
+                  <p style={{ fontSize: 13, color: '#dc2626', margin: 0 }}>점검 실패: {coverage.error}</p>
+                ) : (coverage.findings || []).length === 0 ? (
+                  <p style={{ fontSize: 13, color: '#16a34a', margin: 0 }}>✅ 룰셋 기준 누락·위반이 발견되지 않았습니다.{coverage.note ? ` (${coverage.note})` : ''}</p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {coverage.findings.map((f, i) => (
+                      <div key={i} style={{ fontSize: 13, padding: 8, background: '#fff', border: '1px solid #fee2e2', borderRadius: 6 }}>
+                        <div>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: f.severity === 'violation' ? '#dc2626' : '#d97706',
+                            background: f.severity === 'violation' ? '#fee2e2' : '#fef3c7', padding: '1px 6px', borderRadius: 4, marginRight: 6 }}>
+                            {f.severity === 'violation' ? '위반' : '누락'}
+                          </span>
+                          <strong>{f.rule}</strong>
+                          {f.where && <span style={{ color: '#6b7280', fontSize: 12 }}> · {f.where}</span>}
+                        </div>
+                        {f.detail && <div style={{ color: '#374151', marginTop: 3 }}>{f.detail}</div>}
+                        {f.suggestion && <div style={{ color: '#7c3aed', marginTop: 3, fontSize: 12 }}>↳ 반영안: {f.suggestion}</div>}
+                      </div>
+                    ))}
+                    <p style={{ fontSize: 12, color: '#9ca3af', margin: '2px 0 0' }}>
+                      이 항목들을 룰셋에 반영한 뒤 "재추출"하면 다음 트리에 적용됩니다.
+                    </p>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 

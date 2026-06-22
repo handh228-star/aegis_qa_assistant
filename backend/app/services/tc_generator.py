@@ -993,6 +993,78 @@ def linearize_flow_tree(flow_tree: Dict) -> Dict:
     return {"testcases": testcases}
 
 
+def flow_tree_outline(flow_tree: Dict, max_len: int = 18000) -> str:
+    """흐름 트리를 들여쓰기 텍스트 개요로 평탄화 (커버리지 점검 프롬프트용, 컴팩트)."""
+    lines: List[str] = []
+
+    def walk(node: Dict, depth: int):
+        t = node.get("type", "?")
+        c = (node.get("content", "") or "").replace("\n", " ")
+        mp = node.get("menu_path")
+        suffix = f"  [menu: {mp}]" if mp else ""
+        lines.append(f"{'  ' * depth}- {t}: {c}{suffix}")
+        for ch in node.get("children") or []:
+            walk(ch, depth + 1)
+
+    for root in (flow_tree or {}).get("tree", []) or []:
+        walk(root, 0)
+    text = "\n".join(lines)
+    return text[:max_len] + ("\n…(이하 생략)" if len(text) > max_len else "")
+
+
+COVERAGE_CHECK_PROMPT = """당신은 QA 리드입니다. 아래 [QA 규칙]을 기준으로 [흐름 트리]를 점검하여, **규칙을 충족하지 못한(누락·위반) 항목만** 찾아내세요.
+
+원칙:
+- 규칙에 부합하는 부분은 보고하지 마세요. 누락/위반만.
+- 흐름 트리에 실제로 없는 것을 근거로만 지적하세요. 추측·일반론 금지.
+- 규칙이 트리 구조와 무관하면 무시하세요.
+
+[QA 규칙]
+{rules}
+
+[흐름 트리 (타입: PR 상태 / C 클릭 / T 입력 / H 호버 / D 표시 / V 검증)]
+{outline}
+
+다음 JSON으로만 응답 (코드블록 없이):
+{
+  "findings": [
+    {
+      "rule": "관련 규칙 요약(한 줄)",
+      "severity": "missing 또는 violation",
+      "where": "관련 화면/노드 경로(있으면)",
+      "detail": "무엇이 빠졌거나 어긋났는지 구체적으로",
+      "suggestion": "흐름 트리에 어떻게 반영하면 되는지(룰셋 재추출 시 반영될 형태)"
+    }
+  ]
+}
+누락/위반이 없으면 {"findings": []} 로 응답하세요."""
+
+
+def check_flow_coverage(flow_tree: Dict, rules_text: str) -> Dict:
+    """흐름 트리를 룰셋 규칙과 대조해 누락·위반 항목을 찾는다 (AI 점검).
+
+    rules_text가 비어 있으면 빈 결과. 실패해도 빈 결과로 안전 반환.
+    """
+    if not (rules_text or "").strip():
+        return {"findings": [], "note": "룰셋에 트리 규칙이 없습니다."}
+    outline = flow_tree_outline(flow_tree)
+    if not outline.strip():
+        return {"findings": [], "note": "흐름 트리가 비어 있습니다."}
+    prompt = COVERAGE_CHECK_PROMPT.replace("{rules}", rules_text).replace("{outline}", outline)
+    try:
+        text = _generate_content_with_retry(
+            prompt,
+            model=settings.GEMINI_MODEL_EXTRACT,
+            fallback_model=settings.GEMINI_MODEL_EXTRACT_FALLBACK or None,
+        )
+        result = _parse_json_response(text)
+        findings = result.get("findings", []) if isinstance(result, dict) else []
+        return {"findings": findings}
+    except Exception as e:
+        print(f"[커버리지 점검 실패] {str(e)[:150]}")
+        return {"findings": [], "error": str(e)[:200]}
+
+
 def generate_tc_from_pdf(pdf_path: str, tc_level: int = 2) -> Dict:
     analysis = analyze_document(pdf_path)
     features = analysis.get("features", [])
