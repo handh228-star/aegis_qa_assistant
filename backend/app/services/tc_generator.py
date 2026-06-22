@@ -790,6 +790,99 @@ def build_menu_tree(pdf_path: str, ruleset=None, original_filename: str = None) 
     return _parse_json_response(response_text)
 
 
+# ============================================================================
+# 흐름 트리(Flow Tree) — 행동 흐름 메뉴트리 추출 (정식 전환 1단계, 비파괴 추가)
+# 설계: docs/flow_tree_schema_design.md  |  PoC: docs/PoC_FlowTree_doc82_v3.xlsx
+# 기존 구조적 트리(build_menu_tree)는 그대로 두고, 흐름 트리를 별도 함수로 제공.
+# 태깅 관례(§4)는 QA 합의 전 기본값이며 프롬프트 문구로 조정 가능.
+# ============================================================================
+FLOW_PROMPT = """당신은 10년 경력의 QA 전문가입니다. 이 기획서를 읽고, 사람 QA가 테스트 설계로 쓰는 **상호작용 흐름 메뉴트리**를 만드세요.
+단순 UI 요소 나열이 아니라 "어떤 상태에서, 무엇을 하면, 무엇이 표시되는가"의 **행동 흐름**을 좌→우로 펼친 트리입니다.
+
+[노드 타입 (각 노드 type 1개 필수)]
+- PR = 사전조건/상태 (메뉴 진입 상태, 권한 상태, 코드 상태 등 분기 조건)
+- C = 클릭/선택/터치 액션 | T = 입력 | H = 마우스오버/툴팁 | DC = 더블클릭 | RC = 우클릭
+- D = 화면 표시/결과 (노출되는 모든 것) | V = 검증 포인트(눈으로 확인)
+
+[★ 정밀도 규칙 — 사람 수준으로 빠짐없이 잘게]
+1. **표시 요소는 하나하나 개별 D 노드로 분해하라. 절대 뭉치지 마라.**
+   - 팝업/화면 하나에 타이틀·서브카피·본문·각 버튼·썸네일·안내문구·장점 항목이 있으면 전부 개별 D. 목록은 항목마다 D.
+2. **화면의 모든 형제 UI 요소를 포함하라 — 신규 기능만 보지 마라.** 같은 화면의 기존 버튼·필터·영역도 D로. 화면 진입 시 기본 표시 요소를 먼저 D로 나열한 뒤 흐름 전개.
+3. **상태 차원의 각 값마다 반드시 별도 PR 분기.** 합치지 마라. (권한 읽기만/사용안함/읽기쓰기, 코드 정상/미계약/해지, 설치/미설치 등)
+4. **기획서의 모든 화면·페이지를 빠짐없이 다뤄라.** 진입점이 여러 개면 PR 루트도 그만큼.
+5. **흐름은 종료 지점까지 끝까지 전개.** 액션(C/T) → 결과(D) → 그 안의 또 다른 액션 → 결과 … 깊게.
+6. D 노드 content엔 **기획서 실제 문구를 그대로 인용**. 추상 표현 금지. 기획서에 없는 건 만들지 마라.
+7. 각 노드에 spec_page(출처 페이지 번호; 모르면 "")를 넣어라. 루트 PR에는 menu_path(메뉴 경로)도 넣어라.
+8. 분량을 아끼지 마라. 빠짐없이 전개가 요약보다 훨씬 중요하다.
+
+[출력 — 순수 JSON만, 코드블록 없이]
+{
+  "title": "기획서 제목",
+  "tree": [
+    {"type":"PR","content":"미납대장 진입된 상태","menu_path":"XpERP > 수납 > 미납조회 > 미납대장","spec_page":"5","children":[
+      {"type":"D","content":"타이틀 출력 - 미납대장","spec_page":"5","children":[]},
+      {"type":"C","content":"간편전자고지서 QR안내문 다운로드 버튼 클릭","spec_page":"6","children":[
+        {"type":"D","content":"<결과 기획서 문구>","spec_page":"6","children":[]}
+      ]}
+    ]}
+  ]
+}"""
+
+
+def _assign_flow_ids(nodes: List[Dict], prefix: str = "") -> None:
+    """흐름 트리 노드에 계층 id를 부여 (피드백·TC 추적의 안정 키). in-place."""
+    for i, node in enumerate(nodes, start=1):
+        node["id"] = f"{prefix}{i}" if not prefix else f"{prefix}-{i}"
+        children = node.get("children") or []
+        if children:
+            _assign_flow_ids(children, node["id"])
+
+
+def build_flow_tree(pdf_path: str, ruleset=None, original_filename: str = None) -> Dict:
+    """PDF 기획서에서 흐름 트리(행동 흐름 메뉴트리)를 추출한다.
+
+    기존 build_menu_tree(구조적 트리)와 병존하는 별도 추출 경로. 결과에 format="flow"를
+    표기하고 각 노드에 계층 id를 코드로 부여한다. (설계: docs/flow_tree_schema_design.md)
+    """
+    extra = ""
+    if ruleset and ruleset.tree_rules:
+        extra = (
+            "\n\n[추가 지침 — 보조 가이드]\n"
+            "아래는 본 프롬프트 원칙(기획서 근거·추측 금지)을 보충하는 관점 가이드입니다. "
+            "충돌 시 본 프롬프트가 우선합니다.\n\n"
+            f"{ruleset.tree_rules}"
+        )
+    prompt = FLOW_PROMPT + extra
+
+    filename_hint = ""
+    if original_filename:
+        filename_hint = f"[기획서 원본 파일명] {original_filename}\n\n"
+
+    if is_text_based_pdf(pdf_path):
+        text = extract_text_from_pdf(pdf_path)
+        if len(text) > 20000:
+            text = text[:20000] + "\n\n[이하 생략]"
+        response_text = _generate_content_with_retry(
+            f"{filename_hint}다음은 기획서 내용입니다:\n\n{text}\n\n{prompt}",
+            model=settings.GEMINI_MODEL_EXTRACT,
+            fallback_model=settings.GEMINI_MODEL_EXTRACT_FALLBACK or None,
+        )
+    else:
+        chunks = pdf_to_base64_chunks(pdf_path, chunk_size=10)
+        contents = [{"inline_data": {"mime_type": "application/pdf", "data": b}} for b in chunks]
+        contents.append(filename_hint + prompt if filename_hint else prompt)
+        response_text = _generate_content_with_retry(
+            contents,
+            model=settings.GEMINI_MODEL_EXTRACT,
+            fallback_model=settings.GEMINI_MODEL_EXTRACT_FALLBACK or None,
+        )
+
+    result = _parse_json_response(response_text)
+    result["format"] = "flow"
+    _assign_flow_ids(result.get("tree", []))
+    return result
+
+
 def generate_tc_from_pdf(pdf_path: str, tc_level: int = 2) -> Dict:
     analysis = analyze_document(pdf_path)
     features = analysis.get("features", [])
