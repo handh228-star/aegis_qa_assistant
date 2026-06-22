@@ -143,6 +143,7 @@ export default function TreeViewPage() {
   const [flow, setFlow] = useState(null)       // { flow_tree, stats } | null
   const [flowBusy, setFlowBusy] = useState(false)
   const [flowMsg, setFlowMsg] = useState('')
+  const [view, setView] = useState('flow')     // 'flow'(마스터) | 'structural'
   const pollingRef = useRef(null)
   const elapsedRef = useRef(null)
   const flowPollRef = useRef(null)
@@ -198,6 +199,7 @@ export default function TreeViewPage() {
   }
 
   async function handleGenerateTcFromFlow() {
+    if (!window.confirm('흐름 트리를 기반으로 TC를 새로 생성합니다.\n이 문서의 기존 TC는 모두 교체(삭제 후 재생성)됩니다. 계속할까요?')) return
     setFlowBusy(true)
     setFlowMsg('흐름 트리에서 TC 생성 중...')
     try {
@@ -279,47 +281,25 @@ export default function TreeViewPage() {
       </nav>
 
       <div className="container">
-        <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <div>
-            <h1>{tree?.title || '메뉴트리'}</h1>
-            <p>AI가 기획서를 분석하여 테스트 대상 기능 구조를 추출했습니다. 검토 후 TC를 생성하세요.</p>
-          </div>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexShrink: 0 }}>
-            <div style={{ fontSize: 13, color: '#6b7280', textAlign: 'right' }}>
-              <div>전체 기능: <strong>{totalFeatures}</strong>개</div>
-              {excludedCount > 0 && <div style={{ color: '#ef4444' }}>제외: {excludedCount}개</div>}
-              <div style={{ color: '#16a34a' }}>생성 대상: <strong>{includeCount}</strong>개</div>
-            </div>
-            {tree && (
-              <a
-                href={api.treeExportUrl(documentId)}
-                target="_blank"
-                rel="noreferrer"
-                style={{
-                  padding: '10px 16px', borderRadius: 8, border: '1px solid #d1d5db',
-                  background: '#fff', color: '#374151', fontWeight: 600, fontSize: 14,
-                  textDecoration: 'none', display: 'inline-block',
-                }}
-              >
-                📥 Excel 다운로드
-              </a>
-            )}
-            <button
-              onClick={handleGenerateTc}
-              disabled={generating || includeCount === 0}
+        <div className="page-header">
+          <h1>{tree?.title || '메뉴트리'}</h1>
+          <p>기획서에서 추출한 트리를 검토하고 TC를 생성하세요. <strong>흐름 트리</strong>가 마스터이며, TC는 흐름 트리에서 파생됩니다.</p>
+        </div>
+
+        {/* 뷰 탭 */}
+        <div style={{ display: 'flex', gap: 4, marginBottom: 16, borderBottom: '1px solid #e5e7eb' }}>
+          {[['flow', '🌊 흐름 트리', '마스터'], ['structural', '🗂 구조적 트리', null]].map(([k, label, tag]) => (
+            <button key={k} onClick={() => setView(k)}
               style={{
-                padding: '10px 24px', borderRadius: 8, border: 'none',
-                background: generating ? '#9ca3af' : '#2563eb',
-                color: '#fff', fontWeight: 700, fontSize: 15, cursor: generating ? 'not-allowed' : 'pointer',
-              }}
-            >
-              {generating ? (
-                <span>TC 생성중 ⟳</span>
-              ) : (
-                <span>TC 생성 시작 →</span>
-              )}
+                padding: '10px 18px', border: 'none', background: 'none', cursor: 'pointer',
+                fontSize: 14, fontWeight: view === k ? 700 : 500,
+                color: view === k ? '#2563eb' : '#6b7280',
+                borderBottom: view === k ? '2px solid #2563eb' : '2px solid transparent',
+                marginBottom: -1,
+              }}>
+              {label}{tag && <span style={{ fontSize: 11, color: '#9ca3af', marginLeft: 4 }}>({tag})</span>}
             </button>
-          </div>
+          ))}
         </div>
 
         {error && (
@@ -328,6 +308,30 @@ export default function TreeViewPage() {
             {error}
           </div>
         )}
+
+        {view === 'structural' && (
+        <>
+        <div className="card" style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ fontSize: 13, color: '#6b7280' }}>
+            전체 기능 <strong>{totalFeatures}</strong>개 · 생성 대상 <strong style={{ color: '#16a34a' }}>{includeCount}</strong>개
+            {excludedCount > 0 && <span style={{ color: '#ef4444' }}> · 제외 {excludedCount}개</span>}
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {tree && (
+              <a href={api.treeExportUrl(documentId)} target="_blank" rel="noreferrer"
+                style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid #d1d5db', background: '#fff',
+                  color: '#374151', fontWeight: 600, fontSize: 14, textDecoration: 'none' }}>
+                📥 메뉴트리 Excel
+              </a>
+            )}
+            <button onClick={handleGenerateTc} disabled={generating || includeCount === 0}
+              style={{ padding: '8px 18px', borderRadius: 8, border: 'none',
+                background: generating ? '#9ca3af' : '#2563eb', color: '#fff', fontWeight: 700, fontSize: 14,
+                cursor: generating ? 'not-allowed' : 'pointer' }}>
+              {generating ? 'TC 생성중 ⟳' : '구조적 트리로 TC 생성 →'}
+            </button>
+          </div>
+        </div>
 
         {generating && (
           <div style={{ padding: 16, background: '#eff6ff', borderRadius: 8, marginBottom: 16 }}>
@@ -396,8 +400,11 @@ export default function TreeViewPage() {
             </div>
           ) : null}
         </div>
+        </>
+        )}
 
         {/* 흐름 트리 (행동 흐름 메뉴트리) */}
+        {view === 'flow' && (
         <div className="card" style={{ marginTop: 16 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
             <div>
@@ -455,6 +462,7 @@ export default function TreeViewPage() {
             </p>
           ) : null}
         </div>
+        )}
       </div>
     </div>
   )
