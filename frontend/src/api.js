@@ -28,6 +28,8 @@ export const api = {
   flowTreeExportUrl: (docId) => `${BASE}/documents/${docId}/flow-tree/export`,
   generateTcFromFlow: (docId) => axios.post(`${BASE}/documents/${docId}/flow-tree/generate-tc`),
   flowCoverageCheck: (docId) => axios.post(`${BASE}/documents/${docId}/flow-tree/coverage-check`),
+  appendRule: (docId, rule, target = 'tree') =>
+    axios.post(`${BASE}/documents/${docId}/ruleset/append-rule`, { rule, target }),
 
   // RuleSets
   getRulesets: () => axios.get(`${BASE}/rulesets/`),

@@ -504,6 +504,60 @@ def flow_coverage_check(document_id: int, db: Session = Depends(get_db)):
     }
 
 
+class RuleAppendIn(BaseModel):
+    rule: str
+    target: Optional[str] = "tree"   # 'tree' | 'tc'
+
+
+@router.post("/{document_id}/ruleset/append-rule")
+def append_ruleset_rule(document_id: int, payload: RuleAppendIn, db: Session = Depends(get_db)):
+    """QA 피드백/점검 결과를 프로젝트 룰셋에 한 줄 규칙으로 추가한다.
+
+    시스템(공유) 룰셋이면 직접 수정하지 않고 프로젝트 전용 룰셋으로 복제(clone-on-write) 후 추가.
+    추가된 규칙은 다음 흐름 트리 '재추출' 시 반영된다.
+    """
+    rule = (payload.rule or "").strip()
+    if not rule:
+        raise HTTPException(status_code=400, detail="규칙 내용이 비어 있습니다")
+    doc = db.query(Document).filter(Document.id == document_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="문서를 찾을 수 없습니다")
+    project = db.query(Project).filter(Project.id == doc.project_id).first()
+    rs = _get_ruleset(db, document_id)
+
+    cloned = False
+    if rs is None or rs.is_system:
+        new_rs = QARuleSet(
+            name=f"{project.name if project else '프로젝트'} 전용",
+            description="QA 피드백·커버리지 점검 반영용 프로젝트 전용 룰셋",
+            service_type=rs.service_type if rs else None,
+            tree_rules=(rs.tree_rules if rs else "") or "",
+            tc_rules=(rs.tc_rules if rs else "") or "",
+            is_default=False,
+            is_system=False,
+        )
+        db.add(new_rs)
+        db.flush()  # id 확보
+        if project:
+            project.ruleset_id = new_rs.id
+        rs = new_rs
+        cloned = True
+
+    field = "tc_rules" if payload.target == "tc" else "tree_rules"
+    existing = (getattr(rs, field) or "").rstrip()
+    stamp = datetime.now().strftime("%Y-%m-%d")
+    setattr(rs, field, f"{existing}\n- (QA 반영 {stamp}) {rule}")
+    db.commit()
+    return {
+        "ruleset_id": rs.id,
+        "ruleset_name": rs.name,
+        "cloned": cloned,
+        "target": payload.target or "tree",
+        "message": ("프로젝트 전용 룰셋을 생성하고 규칙을 추가했습니다." if cloned
+                    else "룰셋에 규칙을 추가했습니다."),
+    }
+
+
 @router.post("/{document_id}/flow-tree/generate-tc")
 def generate_tc_from_flow(document_id: int, db: Session = Depends(get_db)):
     """흐름 트리를 선형화해 TC 생성 (트리=마스터, TC=파생).

@@ -146,6 +146,9 @@ export default function TreeViewPage() {
   const [view, setView] = useState('flow')     // 'flow'(마스터) | 'structural'
   const [coverage, setCoverage] = useState(null) // 룰셋 커버리지 점검 결과 | null
   const [covBusy, setCovBusy] = useState(false)
+  const [applied, setApplied] = useState(new Set()) // 룰셋에 반영한 finding 인덱스
+  const [ruleMsg, setRuleMsg] = useState('')
+  const [newRule, setNewRule] = useState('')
   const pollingRef = useRef(null)
   const elapsedRef = useRef(null)
   const flowPollRef = useRef(null)
@@ -224,6 +227,23 @@ export default function TreeViewPage() {
     } finally {
       setCovBusy(false)
     }
+  }
+
+  async function handleApplyRule(rule, idx) {
+    try {
+      const { data } = await api.appendRule(documentId, rule, 'tree')
+      if (idx != null) setApplied(prev => new Set(prev).add(idx))
+      setRuleMsg(`✅ ${data.message} (룰셋: ${data.ruleset_name}) — "재추출"하면 반영됩니다.`)
+    } catch (e) {
+      setRuleMsg('규칙 추가 실패: ' + (e.response?.data?.detail || e.message))
+    }
+  }
+
+  async function handleAddFreeRule() {
+    const r = newRule.trim()
+    if (!r) return
+    await handleApplyRule(r, null)
+    setNewRule('')
   }
 
   function toggleExclude(id) {
@@ -499,14 +519,46 @@ export default function TreeViewPage() {
                         </div>
                         {f.detail && <div style={{ color: '#374151', marginTop: 3 }}>{f.detail}</div>}
                         {f.suggestion && <div style={{ color: '#7c3aed', marginTop: 3, fontSize: 12 }}>↳ 반영안: {f.suggestion}</div>}
+                        <div style={{ marginTop: 6 }}>
+                          <button
+                            onClick={() => handleApplyRule(f.suggestion || f.rule, i)}
+                            disabled={applied.has(i)}
+                            style={{ fontSize: 12, fontWeight: 600, padding: '3px 10px', borderRadius: 6,
+                              border: '1px solid #ddd6fe', cursor: applied.has(i) ? 'default' : 'pointer',
+                              background: applied.has(i) ? '#f3f4f6' : '#f5f3ff',
+                              color: applied.has(i) ? '#9ca3af' : '#7c3aed' }}>
+                            {applied.has(i) ? '✓ 룰셋에 추가됨' : '+ 룰셋에 추가'}
+                          </button>
+                        </div>
                       </div>
                     ))}
-                    <p style={{ fontSize: 12, color: '#9ca3af', margin: '2px 0 0' }}>
-                      이 항목들을 룰셋에 반영한 뒤 "재추출"하면 다음 트리에 적용됩니다.
-                    </p>
                   </div>
                 )}
               </div>
+            </div>
+          )}
+
+          {/* QA 규칙 직접 추가 (피드백→룰셋 루프) */}
+          {flow && (
+            <div style={{ marginBottom: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input
+                value={newRule}
+                onChange={e => setNewRule(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleAddFreeRule() }}
+                placeholder="QA 규칙 직접 추가 (예: 모든 입력란에 라벨 D와 형식 검증 V를 둘 것) → 룰셋에 반영"
+                style={{ flex: 1, padding: '8px 10px', borderRadius: 8, border: '1px solid #d1d5db', fontSize: 13 }}
+              />
+              <button onClick={handleAddFreeRule} disabled={!newRule.trim()}
+                style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid #ddd6fe', whiteSpace: 'nowrap',
+                  background: newRule.trim() ? '#f5f3ff' : '#f3f4f6', color: newRule.trim() ? '#7c3aed' : '#9ca3af',
+                  fontWeight: 600, fontSize: 13, cursor: newRule.trim() ? 'pointer' : 'default' }}>
+                + 룰셋에 규칙 추가
+              </button>
+            </div>
+          )}
+          {ruleMsg && (
+            <div style={{ marginBottom: 12, padding: 8, background: '#ecfdf5', borderRadius: 8, color: '#047857', fontSize: 13 }}>
+              {ruleMsg}
             </div>
           )}
 
