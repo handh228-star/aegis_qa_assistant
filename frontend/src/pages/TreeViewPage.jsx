@@ -233,7 +233,11 @@ export default function TreeViewPage() {
     try {
       const { data } = await api.appendRule(documentId, rule, 'tree')
       if (idx != null) setApplied(prev => new Set(prev).add(idx))
-      setRuleMsg(`✅ ${data.message} (룰셋: ${data.ruleset_name}) — "재추출"하면 반영됩니다.`)
+      if (data.duplicate) {
+        setRuleMsg(`ℹ️ ${data.message}`)
+      } else {
+        setRuleMsg(`✅ ${data.message} (룰셋: ${data.ruleset_name}) — "재추출"하면 반영됩니다.`)
+      }
     } catch (e) {
       setRuleMsg('규칙 추가 실패: ' + (e.response?.data?.detail || e.message))
     }
@@ -514,21 +518,40 @@ export default function TreeViewPage() {
                             background: f.severity === 'violation' ? '#fee2e2' : '#fef3c7', padding: '1px 6px', borderRadius: 4, marginRight: 6 }}>
                             {f.severity === 'violation' ? '위반' : '누락'}
                           </span>
+                          {f.fixability === 'spec_limited' ? (
+                            <span style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', background: '#f3f4f6', padding: '1px 6px', borderRadius: 4, marginRight: 6 }}>
+                              기획서 보강 필요
+                            </span>
+                          ) : (
+                            <span style={{ fontSize: 11, fontWeight: 700, color: '#9333ea', background: '#f5f3ff', padding: '1px 6px', borderRadius: 4, marginRight: 6 }}>
+                              룰셋 강화 가능
+                            </span>
+                          )}
                           <strong>{f.rule}</strong>
                           {f.where && <span style={{ color: '#6b7280', fontSize: 12 }}> · {f.where}</span>}
                         </div>
                         {f.detail && <div style={{ color: '#374151', marginTop: 3 }}>{f.detail}</div>}
-                        {f.suggestion && <div style={{ color: '#7c3aed', marginTop: 3, fontSize: 12 }}>↳ 반영안: {f.suggestion}</div>}
+                        {f.suggestion && (
+                          <div style={{ color: f.fixability === 'spec_limited' ? '#6b7280' : '#7c3aed', marginTop: 3, fontSize: 12 }}>
+                            ↳ {f.fixability === 'spec_limited' ? '기획서 보강안' : '룰셋 강화안'}: {f.suggestion}
+                          </div>
+                        )}
                         <div style={{ marginTop: 6 }}>
-                          <button
-                            onClick={() => handleApplyRule(f.suggestion || f.rule, i)}
-                            disabled={applied.has(i)}
-                            style={{ fontSize: 12, fontWeight: 600, padding: '3px 10px', borderRadius: 6,
-                              border: '1px solid #ddd6fe', cursor: applied.has(i) ? 'default' : 'pointer',
-                              background: applied.has(i) ? '#f3f4f6' : '#f5f3ff',
-                              color: applied.has(i) ? '#9ca3af' : '#7c3aed' }}>
-                            {applied.has(i) ? '✓ 룰셋에 추가됨' : '+ 룰셋에 추가'}
-                          </button>
+                          {f.fixability === 'spec_limited' ? (
+                            <span style={{ fontSize: 12, color: '#9ca3af' }}>
+                              기획서에 근거가 없어 룰셋 추가로는 채워지지 않습니다. 기획서 보강 또는 트리에서 직접 추가하세요.
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => handleApplyRule(f.suggestion || f.rule, i)}
+                              disabled={applied.has(i)}
+                              style={{ fontSize: 12, fontWeight: 600, padding: '3px 10px', borderRadius: 6,
+                                border: '1px solid #ddd6fe', cursor: applied.has(i) ? 'default' : 'pointer',
+                                background: applied.has(i) ? '#f3f4f6' : '#f5f3ff',
+                                color: applied.has(i) ? '#9ca3af' : '#7c3aed' }}>
+                              {applied.has(i) ? '✓ 룰셋에 추가됨' : '+ 룰셋에 강화 규칙 추가'}
+                            </button>
+                          )}
                         </div>
                       </div>
                     ))}

@@ -525,6 +525,23 @@ def append_ruleset_rule(document_id: int, payload: RuleAppendIn, db: Session = D
     project = db.query(Project).filter(Project.id == doc.project_id).first()
     rs = _get_ruleset(db, document_id)
 
+    field = "tc_rules" if payload.target == "tc" else "tree_rules"
+
+    # 중복 방지: 정규화 후 기존 규칙에 이미 포함돼 있으면 추가하지 않음 (clone 이전에 검사)
+    import re as _re
+    def _norm(s):
+        return _re.sub(r"\s+", "", (s or "")).lower()
+    current_text = (getattr(rs, field) if rs else "") or ""
+    if _norm(rule) and _norm(rule) in _norm(current_text):
+        return {
+            "ruleset_id": rs.id if rs else None,
+            "ruleset_name": rs.name if rs else None,
+            "cloned": False,
+            "duplicate": True,
+            "target": payload.target or "tree",
+            "message": "이미 룰셋에 반영된 내용입니다.",
+        }
+
     cloned = False
     if rs is None or rs.is_system:
         new_rs = QARuleSet(
@@ -543,7 +560,6 @@ def append_ruleset_rule(document_id: int, payload: RuleAppendIn, db: Session = D
         rs = new_rs
         cloned = True
 
-    field = "tc_rules" if payload.target == "tc" else "tree_rules"
     existing = (getattr(rs, field) or "").rstrip()
     stamp = datetime.now().strftime("%Y-%m-%d")
     setattr(rs, field, f"{existing}\n- (QA 반영 {stamp}) {rule}")
@@ -552,6 +568,7 @@ def append_ruleset_rule(document_id: int, payload: RuleAppendIn, db: Session = D
         "ruleset_id": rs.id,
         "ruleset_name": rs.name,
         "cloned": cloned,
+        "duplicate": False,
         "target": payload.target or "tree",
         "message": ("프로젝트 전용 룰셋을 생성하고 규칙을 추가했습니다." if cloned
                     else "룰셋에 규칙을 추가했습니다."),
