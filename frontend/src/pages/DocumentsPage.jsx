@@ -220,7 +220,7 @@ export default function DocumentsPage() {
         <div className="card">
           <div className="card-header">
             <span className="card-title">기획서 목록</span>
-            <span style={{ fontSize: 12, color: '#9ca3af' }}>TC 완료된 문서를 클릭하면 검토 화면으로 이동합니다</span>
+            <span style={{ fontSize: 12, color: '#9ca3af' }}>트리 보기 / TC 검토로 이동할 수 있습니다</span>
           </div>
 
           {documents.length === 0 ? (
@@ -237,6 +237,7 @@ export default function DocumentsPage() {
                   <th>레벨</th>
                   <th>상태</th>
                   <th>업로드일</th>
+                  <th>보기</th>
                 </tr>
               </thead>
               <tbody>
@@ -261,6 +262,24 @@ export default function DocumentsPage() {
                     </td>
                     <td style={{ color: '#9ca3af', fontSize: 12 }}>
                       {new Date(doc.created_at + 'Z').toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}
+                    </td>
+                    <td onClick={e => e.stopPropagation()}>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        {['analyzed', 'tc_generated'].includes(doc.status) && (
+                          <Link to={`/tree/${doc.id}`}
+                            style={{ fontSize: 12, fontWeight: 600, color: '#7c3aed', textDecoration: 'none',
+                              border: '1px solid #ddd6fe', borderRadius: 6, padding: '3px 8px', whiteSpace: 'nowrap' }}>
+                            🌳 트리
+                          </Link>
+                        )}
+                        {doc.status === 'tc_generated' && (
+                          <Link to={`/review/${doc.id}`}
+                            style={{ fontSize: 12, fontWeight: 600, color: '#2563eb', textDecoration: 'none',
+                              border: '1px solid #bfdbfe', borderRadius: 6, padding: '3px 8px', whiteSpace: 'nowrap' }}>
+                            📋 TC 검토
+                          </Link>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
