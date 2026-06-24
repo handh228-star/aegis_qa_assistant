@@ -83,7 +83,8 @@ def init_db():
     from app.models.qa_ruleset import QARuleSet, DEFAULT_TREE_RULES, DEFAULT_TC_RULES
     seed_db = SessionLocal()
     try:
-        if not seed_db.query(QARuleSet).filter(QARuleSet.is_system == True).first():
+        system_rs = seed_db.query(QARuleSet).filter(QARuleSet.is_system == True).first()
+        if not system_rs:
             default_rs = QARuleSet(
                 name="웹 서비스 공통",
                 description="입력란/버튼/팝업/표시영역 등 UI 요소별 체계적 커버리지 룰. 모든 웹 서비스에 기본 적용됩니다.",
@@ -96,5 +97,11 @@ def init_db():
             seed_db.add(default_rs)
             seed_db.commit()
             print("[룰셋] 기본 룰셋 생성 완료")
+        elif (system_rs.tree_rules != DEFAULT_TREE_RULES) or (system_rs.tc_rules != DEFAULT_TC_RULES):
+            # 시스템(공유) 룰셋은 코드의 DEFAULT를 정본으로 유지 — 구 모순 규칙 자동 갱신
+            system_rs.tree_rules = DEFAULT_TREE_RULES
+            system_rs.tc_rules = DEFAULT_TC_RULES
+            seed_db.commit()
+            print("[룰셋] 시스템 룰셋을 최신 기본값으로 동기화")
     finally:
         seed_db.close()
