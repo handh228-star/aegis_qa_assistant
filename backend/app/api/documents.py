@@ -16,7 +16,7 @@ from app.models.project import Project
 from app.models.qa_ruleset import QARuleSet
 from app.core.config import settings
 from app.services.document_parser import get_pdf_page_count
-from app.services.tc_generator import generate_tc_from_pdf, generate_tc_from_tree, build_menu_tree, build_flow_tree, linearize_flow_tree, check_flow_coverage
+from app.services.tc_generator import generate_tc_from_pdf, generate_tc_from_tree, build_menu_tree, build_flow_tree, linearize_flow_tree, check_flow_coverage, repair_flow_tree, generate_tcs_from_flow_paths
 from app.services.flow_tree_report import render_flow_tree_excel, flow_tree_stats
 
 router = APIRouter(prefix="/documents", tags=["documents"])
@@ -84,6 +84,41 @@ def _get_ruleset(db, document_id: int):
     if project and project.ruleset_id:
         return db.query(QARuleSet).filter(QARuleSet.id == project.ruleset_id).first()
     return db.query(QARuleSet).filter(QARuleSet.is_default == True).first()
+
+
+def _get_composed_ruleset(db, document_id: int):
+    """시스템 룰셋(기본값) + 프로젝트 룰셋(추가 레이어)을 합성한 룰셋 객체를 반환.
+
+    flow_rules는 시스템 룰셋이 항상 기반(Base)이 된다.
+    - 내가(Claude) 시스템 룰셋을 업데이트하면 모든 프로젝트에 즉시 반영된다.
+    - 프로젝트 룰셋에 추가된 내용이 있으면 기반 위에 레이어로 덧붙인다.
+    tree_rules/tc_rules는 프로젝트 룰셋 우선, 없으면 시스템 룰셋.
+    """
+    from app.models.qa_ruleset import DEFAULT_FLOW_RULES
+    from types import SimpleNamespace
+
+    system_rs = db.query(QARuleSet).filter(QARuleSet.is_system == True).first()
+    project_rs = _get_ruleset(db, document_id)
+
+    system_flow = (system_rs.flow_rules if system_rs else None) or DEFAULT_FLOW_RULES
+
+    # 프로젝트 룰셋이 시스템 룰셋과 다를 때만 추가 레이어로 붙인다 (단순 클론이면 생략)
+    project_flow_extra = ""
+    if project_rs and not project_rs.is_system and project_rs.flow_rules:
+        if project_rs.flow_rules.strip() != system_flow.strip():
+            project_flow_extra = project_rs.flow_rules
+
+    composed_flow = (
+        system_flow + "\n\n[프로젝트 추가 규칙]\n" + project_flow_extra
+        if project_flow_extra else system_flow
+    )
+
+    return SimpleNamespace(
+        name=(system_rs.name if system_rs else "시스템 룰셋"),
+        flow_rules=composed_flow,
+        tree_rules=(project_rs.tree_rules if project_rs else None) or (system_rs.tree_rules if system_rs else None),
+        tc_rules=(project_rs.tc_rules if project_rs else None) or (system_rs.tc_rules if system_rs else None),
+    )
 
 
 def _analyze_document(document_id: int):
@@ -429,21 +464,76 @@ def export_tree_excel(document_id: int, db: Session = Depends(get_db)):
 # 흐름 트리(Flow Tree) — 행동 흐름 메뉴트리. menu_tree(구조적)와 별도 보관.
 # ============================================================================
 def _build_flow_tree_bg(document_id: int):
-    """백그라운드: PDF에서 흐름 트리 추출 → doc.flow_tree에 저장."""
+    """백그라운드: PDF에서 흐름 트리 추출 → doc.flow_tree에 저장.
+
+    구조적 트리(menu_tree)가 아직 없으면 먼저 추출해 화면 골격으로 삼는다 — 같은 화면이
+    흐름 트리에서 별개 루트로 중복 생성되는 것을 막기 위함(설계: 구조적 트리 → 흐름 트리 2단계).
+    """
     from app.models.database import SessionLocal
     db = SessionLocal()
     try:
         doc = db.query(Document).filter(Document.id == document_id).first()
         if not doc:
             return
-        ruleset = _get_ruleset(db, document_id)
-        flow = build_flow_tree(doc.file_path, ruleset=ruleset, original_filename=doc.original_filename)
+        # 시스템 룰셋(기반) + 프로젝트 룰셋(추가 레이어) 합성 — flow_rules는 항상 시스템이 기반
+        ruleset = _get_composed_ruleset(db, document_id)
+        # menu_tree 추출은 기존 방식(프로젝트 룰셋)으로 그대로
+        raw_ruleset = _get_ruleset(db, document_id)
+
+        if not doc.menu_tree:
+            print(f"[흐름트리] 구조적 트리 없음 — 먼저 추출 doc_id={document_id}")
+            menu_tree = build_menu_tree(doc.file_path, ruleset=raw_ruleset, original_filename=doc.original_filename)
+            doc.menu_tree = json.dumps(menu_tree, ensure_ascii=False)
+            db.commit()
+        else:
+            menu_tree = json.loads(doc.menu_tree)
+
+        flow = build_flow_tree(
+            doc.file_path, ruleset=ruleset, original_filename=doc.original_filename, menu_tree=menu_tree,
+        )
+        st = flow_tree_stats(flow)
+        print(f"[흐름트리 1차] doc_id={document_id}, 노드 {st['total']}개, 깊이 {st['max_depth']}")
+
+        # 자동 교정 패스: 1차 결과를 커버리지 점검 후 not_followed 위반을 Gemini로 수정
+        from app.models.qa_ruleset import DEFAULT_FLOW_RULES
+        flow_rules = (ruleset.flow_rules if ruleset and ruleset.flow_rules else DEFAULT_FLOW_RULES)
+        tree_rules = (ruleset.tree_rules if ruleset and ruleset.tree_rules else "")
+        sections = []
+        if flow_rules:
+            sections.append(f"[target=flow]\n{flow_rules}")
+        if tree_rules:
+            sections.append(f"[target=tree]\n{tree_rules}")
+        rules_text = "\n\n".join(sections)
+        check_result = check_flow_coverage(flow, rules_text)
+        findings = check_result.get("findings", [])
+        fixable_count = sum(1 for f in findings if f.get("fixability") == "not_followed")
+        if fixable_count > 0:
+            print(f"[흐름트리 교정 시작] not_followed {fixable_count}건 기획서 참조 교정 중...")
+            flow = repair_flow_tree(flow, findings,
+                                    pdf_path=doc.file_path,
+                                    original_filename=doc.original_filename)
+            st = flow_tree_stats(flow)
+            print(f"[흐름트리 교정 완료] 노드 {st['total']}개")
+        else:
+            print(f"[흐름트리 교정 불필요] not_followed 위반 없음 (spec_limited {len(findings) - fixable_count}건은 건너뜀)")
+
         doc.flow_tree = json.dumps(flow, ensure_ascii=False)
         db.commit()
-        st = flow_tree_stats(flow)
         print(f"[흐름트리 완료] doc_id={document_id}, 노드 {st['total']}개, 깊이 {st['max_depth']}, 타입 {st['types']}")
     except Exception as e:
-        print(f"[흐름트리 실패] doc_id={document_id}: {str(e)[:200]}")
+        err_msg = str(e)[:300]
+        print(f"[흐름트리 실패] doc_id={document_id}: {err_msg}")
+        try:
+            # 실패 상태를 DB에 기록해서 프론트엔드 폴링이 인식하게 함
+            from app.models.database import SessionLocal as _SL
+            _db = _SL()
+            _doc = _db.query(Document).filter(Document.id == document_id).first()
+            if _doc:
+                _doc.flow_tree = '{"error": true, "message": "' + err_msg.replace('"', "'") + '"}'
+                _db.commit()
+            _db.close()
+        except Exception:
+            pass
     finally:
         db.close()
 
@@ -454,6 +544,10 @@ def start_build_flow_tree(document_id: int, background_tasks: BackgroundTasks, d
     doc = db.query(Document).filter(Document.id == document_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="문서를 찾을 수 없습니다")
+    # 기존 트리를 즉시 지워야 폴링이 "추출 중(ready=False)" 상태를 올바르게 인식한다.
+    # 지우지 않으면 첫 번째 폴링에서 ready=True가 바로 반환돼 직전 트리를 새 결과로 오인한다.
+    doc.flow_tree = None
+    db.commit()
     background_tasks.add_task(_build_flow_tree_bg, document_id)
     return {"message": "흐름 트리 추출을 시작했습니다", "document_id": document_id}
 
@@ -467,37 +561,74 @@ def get_flow_tree(document_id: int, db: Session = Depends(get_db)):
     if not doc.flow_tree:
         return {"ready": False}
     flow = json.loads(doc.flow_tree)
+    if flow.get("error"):
+        return {"ready": False, "error": flow.get("message", "알 수 없는 오류")}
     return {"ready": True, "flow_tree": flow, "stats": flow_tree_stats(flow)}
 
 
 @router.get("/{document_id}/flow-tree/export")
-def export_flow_tree_excel(document_id: int, db: Session = Depends(get_db)):
-    """흐름 트리를 QA 양식 Excel 그리드로 내보내기."""
+def export_flow_tree_excel(document_id: int, with_tc: bool = False, db: Session = Depends(get_db)):
+    """흐름 트리를 QA 양식 Excel 그리드로 내보내기.
+
+    with_tc=true이면:
+      1단계) 흐름트리 렌더링 + 경로(path_tracker) 수집
+      2단계) Gemini로 자연어 TC 생성 (기획서 참조, 1~2분 추가)
+      3단계) TC를 흐름트리 오른쪽에 1:1 배치해 다운로드
+    """
     doc = db.query(Document).filter(Document.id == document_id).first()
     if not doc or not doc.flow_tree:
         raise HTTPException(status_code=404, detail="흐름 트리가 없습니다")
-    buf = render_flow_tree_excel(json.loads(doc.flow_tree))
+
+    if with_tc:
+        # 1단계: 흐름트리 렌더링 + 경로 수집
+        out_paths: dict = {}
+        buf_plain = render_flow_tree_excel(json.loads(doc.flow_tree), _out_paths=out_paths)
+
+        # 2단계: Gemini 자연어 TC 생성 (PDF 없이 노드 content 기반, 배치 처리)
+        tc_by_row = generate_tcs_from_flow_paths(out_paths)
+
+        # 3단계: TC 포함 최종 Excel 생성
+        buf = render_flow_tree_excel(
+            json.loads(doc.flow_tree),
+            include_tc=True,
+            tc_data=tc_by_row,
+        )
+        fname = f"flowtree_tc_{document_id}.xlsx"
+    else:
+        buf = render_flow_tree_excel(json.loads(doc.flow_tree))
+        fname = f"flowtree_{document_id}.xlsx"
+
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f"attachment; filename=flowtree_{document_id}.xlsx"},
+        headers={"Content-Disposition": f"attachment; filename={fname}"},
     )
 
 
 @router.post("/{document_id}/flow-tree/coverage-check")
 def flow_coverage_check(document_id: int, db: Session = Depends(get_db)):
-    """흐름 트리를 프로젝트 룰셋(tree_rules)과 대조해 누락·위반을 점검한다.
+    """흐름 트리를 프로젝트 룰셋(tree_rules + flow_rules)과 대조해 누락·위반을 점검한다.
 
     룰셋을 능동적으로 활용하는 게이트. 결과(findings)는 재추출 시 룰셋에 반영할 단서가 된다.
     """
     doc = db.query(Document).filter(Document.id == document_id).first()
     if not doc or not doc.flow_tree:
         raise HTTPException(status_code=404, detail="흐름 트리가 없습니다. 먼저 흐름 트리를 추출하세요.")
-    ruleset = _get_ruleset(db, document_id)
-    rules_text = (ruleset.tree_rules if ruleset else "") or ""
+    # 생성 때와 동일하게 합성 룰셋 사용 — 시스템 기반 + 프로젝트 추가 레이어
+    ruleset = _get_composed_ruleset(db, document_id)
+    flow_rules = ruleset.flow_rules or ""
+    tree_rules = ruleset.tree_rules or ""
+    # 섹션 라벨을 붙여서 LLM이 각 finding의 출처(target)를 구분할 수 있게 한다 — "+ 룰셋에 강화
+    # 규칙 추가" 버튼이 올바른 필드(flow_rules/tree_rules)에 저장하려면 이 구분이 필요하다.
+    sections = []
+    if flow_rules:
+        sections.append(f"[target=flow — 흐름 트리 구조 문법 규칙]\n{flow_rules}")
+    if tree_rules:
+        sections.append(f"[target=tree — 관점 가이드(커버리지)]\n{tree_rules}")
+    rules_text = "\n\n".join(sections)
     result = check_flow_coverage(json.loads(doc.flow_tree), rules_text)
     return {
-        "ruleset": ruleset.name if ruleset else None,
+        "ruleset": getattr(ruleset, "name", None),
         "findings": result.get("findings", []),
         "note": result.get("note"),
         "error": result.get("error"),
@@ -506,15 +637,16 @@ def flow_coverage_check(document_id: int, db: Session = Depends(get_db)):
 
 class RuleAppendIn(BaseModel):
     rule: str
-    target: Optional[str] = "tree"   # 'tree' | 'tc'
+    target: Optional[str] = "tree"   # 'tree' | 'tc' | 'flow'
+    scope: Optional[str] = "project"  # 'project'(이 프로젝트에만) | 'system'(시스템 룰셋에 반영 — 전체 프로젝트 적용)
 
 
 @router.post("/{document_id}/ruleset/append-rule")
 def append_ruleset_rule(document_id: int, payload: RuleAppendIn, db: Session = Depends(get_db)):
-    """QA 피드백/점검 결과를 프로젝트 룰셋에 한 줄 규칙으로 추가한다.
+    """룰셋에 규칙을 직접 추가한다 (프로그래매틱 용도).
 
-    시스템(공유) 룰셋이면 직접 수정하지 않고 프로젝트 전용 룰셋으로 복제(clone-on-write) 후 추가.
-    추가된 규칙은 다음 흐름 트리 '재추출' 시 반영된다.
+    scope='system': 시스템 룰셋에 추가. scope 미지정: 이 프로젝트 룰셋에 추가.
+    클론-온-라이트 없음 — 프로젝트는 명시적으로 선택된 룰셋만 사용한다.
     """
     rule = (payload.rule or "").strip()
     if not rule:
@@ -522,56 +654,35 @@ def append_ruleset_rule(document_id: int, payload: RuleAppendIn, db: Session = D
     doc = db.query(Document).filter(Document.id == document_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="문서를 찾을 수 없습니다")
-    project = db.query(Project).filter(Project.id == doc.project_id).first()
-    rs = _get_ruleset(db, document_id)
 
-    field = "tc_rules" if payload.target == "tc" else "tree_rules"
+    field = {"tc": "tc_rules", "flow": "flow_rules"}.get(payload.target, "tree_rules")
 
-    # 중복 방지: 정규화 후 기존 규칙에 이미 포함돼 있으면 추가하지 않음 (clone 이전에 검사)
     import re as _re
     def _norm(s):
         return _re.sub(r"\s+", "", (s or "")).lower()
+
+    if payload.scope == "system":
+        rs = db.query(QARuleSet).filter(QARuleSet.is_system == True).first()
+        if not rs:
+            raise HTTPException(status_code=404, detail="시스템 룰셋을 찾을 수 없습니다")
+    else:
+        rs = _get_ruleset(db, document_id)
+        if not rs:
+            rs = db.query(QARuleSet).filter(QARuleSet.is_system == True).first()
+
     current_text = (getattr(rs, field) if rs else "") or ""
     if _norm(rule) and _norm(rule) in _norm(current_text):
-        return {
-            "ruleset_id": rs.id if rs else None,
-            "ruleset_name": rs.name if rs else None,
-            "cloned": False,
-            "duplicate": True,
-            "target": payload.target or "tree",
-            "message": "이미 룰셋에 반영된 내용입니다.",
-        }
-
-    cloned = False
-    if rs is None or rs.is_system:
-        new_rs = QARuleSet(
-            name=f"{project.name if project else '프로젝트'} 전용",
-            description="QA 피드백·커버리지 점검 반영용 프로젝트 전용 룰셋",
-            service_type=rs.service_type if rs else None,
-            tree_rules=(rs.tree_rules if rs else "") or "",
-            tc_rules=(rs.tc_rules if rs else "") or "",
-            is_default=False,
-            is_system=False,
-        )
-        db.add(new_rs)
-        db.flush()  # id 확보
-        if project:
-            project.ruleset_id = new_rs.id
-        rs = new_rs
-        cloned = True
+        return {"ruleset_id": rs.id if rs else None, "ruleset_name": rs.name if rs else None,
+                "duplicate": True, "message": "이미 룰셋에 반영된 내용입니다."}
 
     existing = (getattr(rs, field) or "").rstrip()
     stamp = datetime.now().strftime("%Y-%m-%d")
     setattr(rs, field, f"{existing}\n- (QA 반영 {stamp}) {rule}")
     db.commit()
     return {
-        "ruleset_id": rs.id,
-        "ruleset_name": rs.name,
-        "cloned": cloned,
-        "duplicate": False,
-        "target": payload.target or "tree",
-        "message": ("프로젝트 전용 룰셋을 생성하고 규칙을 추가했습니다." if cloned
-                    else "룰셋에 규칙을 추가했습니다."),
+        "ruleset_id": rs.id, "ruleset_name": rs.name, "duplicate": False,
+        "target": payload.target or "tree", "scope": payload.scope or "project",
+        "message": ("시스템 룰셋에 추가했습니다." if payload.scope == "system" else "룰셋에 추가했습니다."),
     }
 
 

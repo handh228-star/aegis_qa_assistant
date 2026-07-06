@@ -79,8 +79,18 @@ def init_db():
             except Exception:
                 pass
 
+        # qa_rulesets 테이블 신규 컬럼
+        for stmt in [
+            "ALTER TABLE qa_rulesets ADD COLUMN flow_rules TEXT",
+        ]:
+            try:
+                conn.execute(text(stmt))
+                conn.commit()
+            except Exception:
+                pass
+
     # 기본 룰셋 시드 (없을 때만)
-    from app.models.qa_ruleset import QARuleSet, DEFAULT_TREE_RULES, DEFAULT_TC_RULES
+    from app.models.qa_ruleset import QARuleSet, DEFAULT_TREE_RULES, DEFAULT_TC_RULES, DEFAULT_FLOW_RULES
     seed_db = SessionLocal()
     try:
         system_rs = seed_db.query(QARuleSet).filter(QARuleSet.is_system == True).first()
@@ -91,17 +101,15 @@ def init_db():
                 service_type="공통",
                 tree_rules=DEFAULT_TREE_RULES,
                 tc_rules=DEFAULT_TC_RULES,
+                flow_rules=DEFAULT_FLOW_RULES,
                 is_default=True,
                 is_system=True,
             )
             seed_db.add(default_rs)
             seed_db.commit()
             print("[룰셋] 기본 룰셋 생성 완료")
-        elif (system_rs.tree_rules != DEFAULT_TREE_RULES) or (system_rs.tc_rules != DEFAULT_TC_RULES):
-            # 시스템(공유) 룰셋은 코드의 DEFAULT를 정본으로 유지 — 구 모순 규칙 자동 갱신
-            system_rs.tree_rules = DEFAULT_TREE_RULES
-            system_rs.tc_rules = DEFAULT_TC_RULES
-            seed_db.commit()
-            print("[룰셋] 시스템 룰셋을 최신 기본값으로 동기화")
+        # 주의: 최초 생성 이후에는 절대 자동 덮어쓰지 않는다. DB에 저장된 룰셋(웹에서 사용자가
+        # 직접 편집한 내용 포함)이 정본이다 — 코드의 DEFAULT_*는 "신규 설치 시 초기값"일 뿐,
+        # 매 재시작마다 DB를 코드 값으로 되돌리면 웹에서 편집한 내용이 소리없이 사라진다.
     finally:
         seed_db.close()

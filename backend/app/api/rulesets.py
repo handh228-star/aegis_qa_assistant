@@ -15,6 +15,7 @@ class RuleSetCreate(BaseModel):
     service_type: Optional[str] = None
     tree_rules: Optional[str] = None
     tc_rules: Optional[str] = None
+    flow_rules: Optional[str] = None
 
 
 class RuleSetUpdate(BaseModel):
@@ -23,6 +24,7 @@ class RuleSetUpdate(BaseModel):
     service_type: Optional[str] = None
     tree_rules: Optional[str] = None
     tc_rules: Optional[str] = None
+    flow_rules: Optional[str] = None
     is_default: Optional[bool] = None
 
 
@@ -33,6 +35,7 @@ class RuleSetResponse(BaseModel):
     service_type: Optional[str]
     tree_rules: Optional[str]
     tc_rules: Optional[str]
+    flow_rules: Optional[str]
     is_default: bool
     is_system: bool
     created_at: datetime

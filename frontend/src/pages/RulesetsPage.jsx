@@ -4,7 +4,7 @@ import { api } from '../api'
 
 function RuleSetForm({ initial, onSave, onCancel }) {
   const [form, setForm] = useState(initial || {
-    name: '', description: '', service_type: '', tree_rules: '', tc_rules: '',
+    name: '', description: '', service_type: '', tree_rules: '', tc_rules: '', flow_rules: '',
   })
   const [saving, setSaving] = useState(false)
 
@@ -41,6 +41,16 @@ function RuleSetForm({ initial, onSave, onCancel }) {
           onChange={e => setForm({ ...form, tree_rules: e.target.value })}
           rows={8}
           placeholder="메뉴트리를 어떤 기준으로 추출할지 AI에게 추가로 지시할 내용..."
+          style={{ fontFamily: 'monospace', fontSize: 13 }}
+        />
+      </div>
+      <div className="form-group">
+        <label>흐름 트리 구조 문법 규칙 (PR/C/D 배치 — 필수 준수)</label>
+        <textarea
+          value={form.flow_rules}
+          onChange={e => setForm({ ...form, flow_rules: e.target.value })}
+          rows={10}
+          placeholder="비워두면 시스템 기본 구조 문법이 적용됩니다. PR은 언제 새 경로로 분리하는지, D 체이닝, 여집합 분기 등..."
           style={{ fontFamily: 'monospace', fontSize: 13 }}
         />
       </div>
@@ -123,6 +133,15 @@ export default function RulesetsPage() {
           <button className="btn btn-primary" onClick={() => { setShowForm(true); setEditing(null) }}>
             + 새 룰셋
           </button>
+        </div>
+
+        <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8,
+          padding: '12px 16px', marginBottom: 20, fontSize: 13, color: '#1e40af', lineHeight: 1.6 }}>
+          ℹ️ 여기 적힌 텍스트는 <strong>AI(Gemini)에게 전달되는 지침</strong>입니다 — 흐름트리/메뉴트리 생성 시
+          이걸 읽고 트리를 만듭니다. 단, 완성된 트리를 <strong>엑셀의 몇 번째 행·열에 배치할지(행 분리, 열 정렬 등)는
+          이 룰셋과 무관하게 코드가 고정으로 처리</strong>합니다 — 행/열 배치를 바꾸고 싶다면 룰셋이 아니라
+          개발자에게 요청하세요. 이 화면의 내용이 실제로 적용 중인 <strong>유일한 정본</strong>이며,
+          docs 폴더의 .md 문서들은 과거 합의 기록일 뿐 프로그램이 읽지 않습니다.
         </div>
 
         {showForm && !editing && (
@@ -213,6 +232,17 @@ export default function RulesetsPage() {
                           <pre style={{ fontSize: 12, color: '#4b5563', whiteSpace: 'pre-wrap',
                             background: '#f3f4f6', padding: 12, borderRadius: 6, margin: 0, lineHeight: 1.6 }}>
                             {rs.tree_rules}
+                          </pre>
+                        </div>
+                      )}
+                      {rs.flow_rules && (
+                        <div style={{ marginBottom: 16 }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
+                            흐름 트리 구조 문법 규칙 (필수 준수)
+                          </div>
+                          <pre style={{ fontSize: 12, color: '#4b5563', whiteSpace: 'pre-wrap',
+                            background: '#f3f4f6', padding: 12, borderRadius: 6, margin: 0, lineHeight: 1.6 }}>
+                            {rs.flow_rules}
                           </pre>
                         </div>
                       )}

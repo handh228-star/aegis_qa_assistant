@@ -146,9 +146,8 @@ export default function TreeViewPage() {
   const [view, setView] = useState('flow')     // 'flow'(마스터) | 'structural'
   const [coverage, setCoverage] = useState(null) // 룰셋 커버리지 점검 결과 | null
   const [covBusy, setCovBusy] = useState(false)
-  const [applied, setApplied] = useState(new Set()) // 룰셋에 반영한 finding 인덱스
-  const [ruleMsg, setRuleMsg] = useState('')
-  const [newRule, setNewRule] = useState('')
+  const [tcDownloading, setTcDownloading] = useState(false)
+  const [tcDownloadMsg, setTcDownloadMsg] = useState('')
   const pollingRef = useRef(null)
   const elapsedRef = useRef(null)
   const flowPollRef = useRef(null)
@@ -183,20 +182,27 @@ export default function TreeViewPage() {
     setFlowBusy(true)
     setFlowMsg('흐름 트리 추출 중... (1~2분 소요)')
     api.startFlowTree(documentId).then(() => {
-      let tries = 0
+      const startedAt = Date.now()
       flowPollRef.current = setInterval(async () => {
-        tries += 1
+        const elapsed = Math.floor((Date.now() - startedAt) / 1000)
+        const min = Math.floor(elapsed / 60)
+        const sec = elapsed % 60
+        const timeStr = min > 0 ? `${min}분 ${sec}초` : `${sec}초`
+        setFlowMsg(`흐름 트리 추출 중... (${timeStr} 경과)`)
         try {
           const { data } = await api.getFlowTree(documentId)
           if (data.ready) {
             clearInterval(flowPollRef.current)
             setFlow(data); setFlowBusy(false); setFlowMsg('')
-          } else if (tries > 45) {   // ~3분 초과
+          } else if (data.error) {
             clearInterval(flowPollRef.current)
-            setFlowBusy(false); setFlowMsg('추출이 지연되거나 실패했습니다. 잠시 후 다시 시도하세요.')
+            setFlowBusy(false); setFlowMsg('추출 실패: ' + data.error)
+          } else if (elapsed > 600) {  // 10분 초과
+            clearInterval(flowPollRef.current)
+            setFlowBusy(false); setFlowMsg('추출이 오래 걸리고 있습니다. 페이지를 새로고침해서 확인해 보세요.')
           }
         } catch (e) { /* 무시하고 계속 폴링 */ }
-      }, 4000)
+      }, 5000)
     }).catch(e => {
       setFlowBusy(false)
       setFlowMsg('추출 시작 실패: ' + (e.response?.data?.detail || e.message))
@@ -216,6 +222,34 @@ export default function TreeViewPage() {
     }
   }
 
+  async function handleDownloadWithTc() {
+    setTcDownloading(true)
+    const startedAt = Date.now()
+    const timer = setInterval(() => {
+      const sec = Math.floor((Date.now() - startedAt) / 1000)
+      const min = Math.floor(sec / 60), s = sec % 60
+      setTcDownloadMsg(`TC 생성 중... (${min > 0 ? `${min}분 ` : ''}${s}초 경과)`)
+    }, 1000)
+    try {
+      const resp = await fetch(api.flowTreeWithTcExportUrl(documentId))
+      if (!resp.ok) throw new Error('서버 오류: ' + resp.status)
+      const blob = await resp.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `flowtree_tc_${documentId}.xlsx`
+      a.click()
+      URL.revokeObjectURL(url)
+      setTcDownloadMsg('')
+    } catch (e) {
+      setTcDownloadMsg('다운로드 실패: ' + e.message)
+      setTimeout(() => setTcDownloadMsg(''), 4000)
+    } finally {
+      clearInterval(timer)
+      setTcDownloading(false)
+    }
+  }
+
   async function handleCoverageCheck() {
     setCovBusy(true)
     setCoverage(null)
@@ -227,27 +261,6 @@ export default function TreeViewPage() {
     } finally {
       setCovBusy(false)
     }
-  }
-
-  async function handleApplyRule(rule, idx) {
-    try {
-      const { data } = await api.appendRule(documentId, rule, 'tree')
-      if (idx != null) setApplied(prev => new Set(prev).add(idx))
-      if (data.duplicate) {
-        setRuleMsg(`ℹ️ ${data.message}`)
-      } else {
-        setRuleMsg(`✅ ${data.message} (룰셋: ${data.ruleset_name}) — "재추출"하면 반영됩니다.`)
-      }
-    } catch (e) {
-      setRuleMsg('규칙 추가 실패: ' + (e.response?.data?.detail || e.message))
-    }
-  }
-
-  async function handleAddFreeRule() {
-    const r = newRule.trim()
-    if (!r) return
-    await handleApplyRule(r, null)
-    setNewRule('')
   }
 
   function toggleExclude(id) {
@@ -464,11 +477,6 @@ export default function TreeViewPage() {
                 </button>
               ) : (
                 <>
-                  <a href={api.flowTreeExportUrl(documentId)} target="_blank" rel="noreferrer"
-                    style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid #d1d5db', background: '#fff',
-                      color: '#374151', fontWeight: 600, fontSize: 14, textDecoration: 'none' }}>
-                    📥 Excel
-                  </a>
                   <button onClick={handleExtractFlow} disabled={flowBusy}
                     style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid #d1d5db', background: '#fff',
                       color: '#374151', fontWeight: 600, fontSize: 14, cursor: flowBusy ? 'not-allowed' : 'pointer' }}>
@@ -478,11 +486,28 @@ export default function TreeViewPage() {
                     title="프로젝트 룰셋 기준으로 흐름 트리의 누락·위반을 점검"
                     style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid #fcd34d', background: '#fffbeb',
                       color: '#b45309', fontWeight: 600, fontSize: 14, cursor: (covBusy || flowBusy) ? 'not-allowed' : 'pointer' }}>
-                    {covBusy ? '점검 중 ⟳' : '🔎 룰셋 점검'}
+                    {covBusy ? '분석 중 ⟳' : '🤖 AI 교정 리포트'}
                   </button>
-                  <button onClick={handleGenerateTcFromFlow} disabled={flowBusy}
+                  <a href={api.flowTreeExportUrl(documentId)} target="_blank" rel="noreferrer"
+                    style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid #d1d5db', background: '#fff',
+                      color: '#374151', fontWeight: 600, fontSize: 14, textDecoration: 'none' }}>
+                    📥 흐름트리 Excel
+                  </a>
+                  <button onClick={handleDownloadWithTc} disabled={tcDownloading || flowBusy}
+                    style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid #6366f1',
+                      background: tcDownloading ? '#e0e7ff' : '#eef2ff',
+                      color: tcDownloading ? '#6366f1' : '#4338ca',
+                      fontWeight: 600, fontSize: 14,
+                      cursor: tcDownloading ? 'not-allowed' : 'pointer' }}>
+                    {tcDownloading ? '⏳ TC 생성 중...' : '📥 흐름트리 + TC Excel'}
+                  </button>
+                  {tcDownloadMsg && (
+                    <span style={{ fontSize: 12, color: '#6366f1', marginLeft: 4 }}>{tcDownloadMsg}</span>
+                  )}
+                  <button disabled
+                    title="현재 미사용"
                     style={{ padding: '8px 16px', borderRadius: 8, border: 'none', fontWeight: 700, fontSize: 14,
-                      background: flowBusy ? '#9ca3af' : '#2563eb', color: '#fff', cursor: flowBusy ? 'not-allowed' : 'pointer' }}>
+                      background: '#e5e7eb', color: '#9ca3af', cursor: 'not-allowed' }}>
                     이 흐름트리로 TC 생성 →
                   </button>
                 </>
@@ -527,6 +552,9 @@ export default function TreeViewPage() {
                               룰셋 강화 가능
                             </span>
                           )}
+                          <span style={{ fontSize: 11, fontWeight: 700, color: '#0369a1', background: '#e0f2fe', padding: '1px 6px', borderRadius: 4, marginRight: 6 }}>
+                            {f.target === 'flow' ? '구조 문법' : '관점 가이드'}
+                          </span>
                           <strong>{f.rule}</strong>
                           {f.where && <span style={{ color: '#6b7280', fontSize: 12 }}> · {f.where}</span>}
                         </div>
@@ -536,23 +564,11 @@ export default function TreeViewPage() {
                             ↳ {f.fixability === 'spec_limited' ? '기획서 보강안' : '룰셋 강화안'}: {f.suggestion}
                           </div>
                         )}
-                        <div style={{ marginTop: 6 }}>
-                          {f.fixability === 'spec_limited' ? (
-                            <span style={{ fontSize: 12, color: '#9ca3af' }}>
-                              기획서에 근거가 없어 룰셋 추가로는 채워지지 않습니다. 기획서 보강 또는 트리에서 직접 추가하세요.
-                            </span>
-                          ) : (
-                            <button
-                              onClick={() => handleApplyRule(f.suggestion || f.rule, i)}
-                              disabled={applied.has(i)}
-                              style={{ fontSize: 12, fontWeight: 600, padding: '3px 10px', borderRadius: 6,
-                                border: '1px solid #ddd6fe', cursor: applied.has(i) ? 'default' : 'pointer',
-                                background: applied.has(i) ? '#f3f4f6' : '#f5f3ff',
-                                color: applied.has(i) ? '#9ca3af' : '#7c3aed' }}>
-                              {applied.has(i) ? '✓ 룰셋에 추가됨' : '+ 룰셋에 강화 규칙 추가'}
-                            </button>
-                          )}
-                        </div>
+                        {f.fixability === 'spec_limited' && (
+                          <div style={{ marginTop: 4, fontSize: 12, color: '#9ca3af' }}>
+                            기획서에 근거가 없어 자동 교정이 불가합니다. 기획서 보강 또는 트리에서 직접 수정하세요.
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -561,29 +577,6 @@ export default function TreeViewPage() {
             </div>
           )}
 
-          {/* QA 규칙 직접 추가 (피드백→룰셋 루프) */}
-          {flow && (
-            <div style={{ marginBottom: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
-              <input
-                value={newRule}
-                onChange={e => setNewRule(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') handleAddFreeRule() }}
-                placeholder="QA 규칙 직접 추가 (예: 모든 입력란에 라벨 D와 형식 검증 V를 둘 것) → 룰셋에 반영"
-                style={{ flex: 1, padding: '8px 10px', borderRadius: 8, border: '1px solid #d1d5db', fontSize: 13 }}
-              />
-              <button onClick={handleAddFreeRule} disabled={!newRule.trim()}
-                style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid #ddd6fe', whiteSpace: 'nowrap',
-                  background: newRule.trim() ? '#f5f3ff' : '#f3f4f6', color: newRule.trim() ? '#7c3aed' : '#9ca3af',
-                  fontWeight: 600, fontSize: 13, cursor: newRule.trim() ? 'pointer' : 'default' }}>
-                + 룰셋에 규칙 추가
-              </button>
-            </div>
-          )}
-          {ruleMsg && (
-            <div style={{ marginBottom: 12, padding: 8, background: '#ecfdf5', borderRadius: 8, color: '#047857', fontSize: 13 }}>
-              {ruleMsg}
-            </div>
-          )}
 
           {flow?.flow_tree?.tree ? (
             <div style={{ maxHeight: 600, overflowY: 'auto', padding: 4 }}>

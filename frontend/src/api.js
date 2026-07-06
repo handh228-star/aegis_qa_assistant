@@ -26,10 +26,11 @@ export const api = {
   startFlowTree: (docId) => axios.post(`${BASE}/documents/${docId}/flow-tree`),
   getFlowTree: (docId) => axios.get(`${BASE}/documents/${docId}/flow-tree`),
   flowTreeExportUrl: (docId) => `${BASE}/documents/${docId}/flow-tree/export`,
+  flowTreeWithTcExportUrl: (docId) => `${BASE}/documents/${docId}/flow-tree/export?with_tc=true`,
   generateTcFromFlow: (docId) => axios.post(`${BASE}/documents/${docId}/flow-tree/generate-tc`),
   flowCoverageCheck: (docId) => axios.post(`${BASE}/documents/${docId}/flow-tree/coverage-check`),
-  appendRule: (docId, rule, target = 'tree') =>
-    axios.post(`${BASE}/documents/${docId}/ruleset/append-rule`, { rule, target }),
+  appendRule: (docId, rule, target = 'tree', scope = 'project') =>
+    axios.post(`${BASE}/documents/${docId}/ruleset/append-rule`, { rule, target, scope }),
 
   // RuleSets
   getRulesets: () => axios.get(`${BASE}/rulesets/`),
